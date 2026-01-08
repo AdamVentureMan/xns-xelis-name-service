@@ -2,7 +2,7 @@
 
 A decentralized name service (DNS) for the XELIS blockchain, allowing users to register human-readable names that map to wallet addresses.
 
-## 🎯 Overview
+## Overview
 
 XNS (XELIS Name Service) is a smart contract deployed on the XELIS blockchain that enables:
 - **Human-readable names** → Wallet addresses (e.g., `alice.xns` → `xet:...`)
@@ -10,31 +10,31 @@ XNS (XELIS Name Service) is a smart contract deployed on the XELIS blockchain th
 - **Name management** - Renew, transfer, and update target addresses
 - **Grace period** - 30 days to renew expired names
 
-## 📋 Contract Versions
+## Contract Versions
 
 - **XNS.silex** - Initial version
 - **XNS_v2.silex** - Enhanced with dynamic fees and owner/target separation
 - **XNS_v3.silex** - Current production version (deployed to testnet)
 
-## 🚀 Deployment Status
+## Deployment Status
 
 ### Testnet
 - **Contract Address:** `eb7a0d88c570da29201f26d29896a9b6e604c5ea9259b596cea1e9763bb6f097`
 - **Network:** XELIS Testnet
 - **Explorer:** https://testnet-explorer.xelis.io/transaction/eb7a0d88c570da29201f26d29896a9b6e604c5ea9259b596cea1e9763bb6f097
-- **Status:** ✅ Active and tested
+- **Status:** Active and tested
 
 ### Mainnet
-- **Status:** ⏳ Pending deployment
+- **Status:** Pending deployment
 
-## 💰 Pricing
+## Pricing
 
 | Name Length | Registration | Renewal |
 |-------------|-------------|---------|
 | Short (3-4 chars) | 50 XEL | 20 XEL |
 | Normal (5+ chars) | 10 XEL | 5 XEL |
 
-## 🛠️ Project Structure
+## Project Structure
 
 ```
 XEL/
@@ -48,7 +48,7 @@ XEL/
 └── README.md             # This file
 ```
 
-## 📖 Quick Start
+## Quick Start
 
 ### 1. Prerequisites
 
@@ -90,7 +90,7 @@ python xns_client.py resolve myname
 python xns_client.py renew myname
 ```
 
-## 🔧 Contract Functions
+## Contract Functions
 
 - `register(name, target)` - Register a new name
 - `renew(name)` - Renew an expired name
@@ -101,31 +101,31 @@ python xns_client.py renew myname
 - `get_price(name)` - Get registration price
 - `get_renew_price(name)` - Get renewal price
 
-## 📚 Documentation
+## Documentation
 
 - [Testing Guide](docs/TESTING_GUIDE.md) - How to test the contract
 - [Devnet Setup](docs/DEVNET_SETUP.md) - Local development setup
 - [XELIS Setup](docs/SETUP_XELIS.md) - XELIS installation guide
 
-## 🌐 Frontend (Coming Soon)
+## Frontend (Coming Soon)
 
 A web-based dApp is planned for easy name registration and management.
 
 See [XNS_FRONTEND_PLAN.md](XNS_FRONTEND_PLAN.md) for details.
 
-## 🤝 Contributing
+## Contributing
 
 This is an open-source project. Contributions welcome!
 
-## 📝 License
+## License
 
 [Your License Here]
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - XELIS blockchain team for the amazing platform
 - Slixe for help with testnet deployment
 
 ---
 
-**Built with ❤️ for the XELIS ecosystem**
+Built for the XELIS ecosystem
