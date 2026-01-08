@@ -10,11 +10,9 @@ XNS (XELIS Name Service) is a smart contract deployed on the XELIS blockchain th
 - **Name management** - Renew, transfer, and update target addresses
 - **Grace period** - 30 days to renew expired names
 
-## Contract Versions
+## Contract
 
-- **XNS.silex** - Initial version
-- **XNS_v2.silex** - Enhanced with dynamic fees and owner/target separation
-- **XNS_v3.silex** - Current production version (deployed to testnet)
+- **XNS_v3.silex** - Production version (deployed to testnet)
 
 ## Deployment Status
 
@@ -107,11 +105,6 @@ python xns_client.py renew myname
 - [Devnet Setup](docs/DEVNET_SETUP.md) - Local development setup
 - [XELIS Setup](docs/SETUP_XELIS.md) - XELIS installation guide
 
-## Frontend (Coming Soon)
-
-A web-based dApp is planned for easy name registration and management.
-
-See [XNS_FRONTEND_PLAN.md](XNS_FRONTEND_PLAN.md) for details.
 
 ## Contributing
 
@@ -120,12 +113,3 @@ This is an open-source project. Contributions welcome!
 ## License
 
 [Your License Here]
-
-## Acknowledgments
-
-- XELIS blockchain team for the amazing platform
-- Slixe for help with testnet deployment
-
----
-
-Built for the XELIS ecosystem
