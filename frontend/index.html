@@ -11,23 +11,41 @@
         <header>
             <h1>XNS - XELIS Name Service</h1>
             <p class="subtitle">Human-readable names for XELIS addresses</p>
+            <div id="connection-status" class="status-badge status-connecting">
+                <span class="status-dot"></span>
+                <span id="status-text">Connecting to network...</span>
+            </div>
         </header>
 
-        <div id="wallet-status" class="wallet-status">
-            <button id="connect-btn" class="btn btn-primary">Connect Wallet</button>
-            <div id="wallet-info" class="wallet-info hidden">
-                <p><strong>Address:</strong> <span id="wallet-address"></span></p>
-                <p><strong>Balance:</strong> <span id="wallet-balance"></span> XEL</p>
+        <div id="wallet-section" class="wallet-section">
+            <div class="wallet-header">
+                <button id="connect-btn" class="btn btn-primary">Connect Wallet</button>
+                <div id="wallet-info" class="wallet-info hidden">
+                    <div class="wallet-detail">
+                        <span class="label">Address:</span>
+                        <span id="wallet-address" class="value"></span>
+                    </div>
+                    <div class="wallet-detail">
+                        <span class="label">Balance:</span>
+                        <span id="wallet-balance" class="value"></span> XEL
+                    </div>
+                </div>
+            </div>
+            <div class="info-box">
+                <strong>How it works:</strong> 
+                Search and resolve names without a wallet. 
+                Connect your XELIS wallet to register new names.
             </div>
         </div>
 
         <main>
             <section class="search-section">
-                <h2>Search & Register</h2>
+                <h2>Search Names</h2>
                 <div class="search-box">
-                    <input type="text" id="name-input" placeholder="Enter name (e.g., alice)" maxlength="32">
+                    <input type="text" id="name-input" placeholder="Enter name (e.g., alice)" maxlength="32" autocomplete="off">
                     <button id="check-btn" class="btn btn-secondary">Check Availability</button>
                 </div>
+                <div id="live-price" class="live-price hidden"></div>
                 <div id="availability-result" class="result-box hidden"></div>
             </section>
 
@@ -40,6 +58,7 @@
                 <div class="form-group">
                     <label>Target Address (optional):</label>
                     <input type="text" id="target-address" placeholder="Leave empty to use your wallet address">
+                    <small class="form-hint">The address this name will resolve to</small>
                 </div>
                 <div class="form-group">
                     <label>Price:</label>
@@ -51,23 +70,55 @@
 
             <section class="resolve-section">
                 <h2>Resolve Name</h2>
+                <p class="section-desc">Look up the address for a registered name</p>
                 <div class="search-box">
-                    <input type="text" id="resolve-input" placeholder="Enter name to resolve">
+                    <input type="text" id="resolve-input" placeholder="Enter name to resolve" autocomplete="off">
                     <button id="resolve-btn" class="btn btn-secondary">Resolve</button>
                 </div>
                 <div id="resolve-result" class="result-box hidden"></div>
             </section>
+
+            <section class="pricing-section">
+                <h2>Pricing</h2>
+                <table class="pricing-table">
+                    <thead>
+                        <tr>
+                            <th>Name Length</th>
+                            <th>Registration</th>
+                            <th>Renewal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Short (3-4 chars)</td>
+                            <td>50 XEL</td>
+                            <td>20 XEL</td>
+                        </tr>
+                        <tr>
+                            <td>Normal (5+ chars)</td>
+                            <td>10 XEL</td>
+                            <td>5 XEL</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
         </main>
 
         <footer>
-            <p>Contract: <code id="contract-address">eb7a0d88c570da29201f26d29896a9b6e604c5ea9259b596cea1e9763bb6f097</code></p>
-            <p>Network: Testnet</p>
+            <div class="footer-info">
+                <p><strong>Contract:</strong> <code id="contract-address">eb7a0d88c570da29201f26d29896a9b6e604c5ea9259b596cea1e9763bb6f097</code></p>
+                <p><strong>Network:</strong> Testnet</p>
+            </div>
+            <div class="footer-links">
+                <a href="https://github.com/AdamVentureMan/xns-xelis-name-service" target="_blank">GitHub</a>
+                <a href="https://testnet-explorer.xelis.io" target="_blank">Explorer</a>
+            </div>
         </footer>
     </div>
 
+    <script src="js/daemon-rpc.js"></script>
     <script src="js/xswd.js"></script>
     <script src="js/xns-contract.js"></script>
     <script src="js/ui.js"></script>
 </body>
 </html>
-
