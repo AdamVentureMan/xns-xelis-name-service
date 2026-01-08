@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XNS - XELIS Name Service</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>XNS - XELIS Name Service</h1>
+            <p class="subtitle">Human-readable names for XELIS addresses</p>
+        </header>
+
+        <div id="wallet-status" class="wallet-status">
+            <button id="connect-btn" class="btn btn-primary">Connect Wallet</button>
+            <div id="wallet-info" class="wallet-info hidden">
+                <p><strong>Address:</strong> <span id="wallet-address"></span></p>
+                <p><strong>Balance:</strong> <span id="wallet-balance"></span> XEL</p>
+            </div>
+        </div>
+
+        <main>
+            <section class="search-section">
+                <h2>Search & Register</h2>
+                <div class="search-box">
+                    <input type="text" id="name-input" placeholder="Enter name (e.g., alice)" maxlength="32">
+                    <button id="check-btn" class="btn btn-secondary">Check Availability</button>
+                </div>
+                <div id="availability-result" class="result-box hidden"></div>
+            </section>
+
+            <section class="register-section hidden" id="register-section">
+                <h2>Register Name</h2>
+                <div class="form-group">
+                    <label>Name:</label>
+                    <input type="text" id="register-name" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Target Address (optional):</label>
+                    <input type="text" id="target-address" placeholder="Leave empty to use your wallet address">
+                </div>
+                <div class="form-group">
+                    <label>Price:</label>
+                    <div id="register-price" class="price-display"></div>
+                </div>
+                <button id="register-btn" class="btn btn-primary">Register Name</button>
+                <div id="register-result" class="result-box hidden"></div>
+            </section>
+
+            <section class="resolve-section">
+                <h2>Resolve Name</h2>
+                <div class="search-box">
+                    <input type="text" id="resolve-input" placeholder="Enter name to resolve">
+                    <button id="resolve-btn" class="btn btn-secondary">Resolve</button>
+                </div>
+                <div id="resolve-result" class="result-box hidden"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Contract: <code id="contract-address">eb7a0d88c570da29201f26d29896a9b6e604c5ea9259b596cea1e9763bb6f097</code></p>
+            <p>Network: Testnet</p>
+        </footer>
+    </div>
+
+    <script src="js/xswd.js"></script>
+    <script src="js/xns-contract.js"></script>
+    <script src="js/ui.js"></script>
+</body>
+</html>
+
