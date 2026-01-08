@@ -1,0 +1,67 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+.venv
+
+# XELIS Binaries (don't upload executables)
+xelis-bin/*.exe
+xelis-bin/*.dll
+xelis-bin/*.so
+xelis-bin/*.dylib
+
+# Blockchain Data (too large, user-specific)
+xelis-bin/devnet/
+xelis-bin/testnet/
+xelis-bin/mainnet/
+xelis-bin/wallets/
+xelis-bin/devnet_wallet/
+xelis-bin/peerlist-*/
+xelis-bin/logs/
+xelis-bin/precomputed_tables_*.bin
+
+# Mainnet/Testnet data
+mainnet/
+peerlist-mainnet/
+logs/
+
+# Compiled contracts
+*.bin
+xelis_program.txt
+xelis_program_v2_hash.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment variables
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.log
+*.old
+
+# Documentation (keep only essential)
+# builtinfucntions.txt - keep this, it's useful
+# xelis_silex_full_docs.txt - too large, maybe exclude
+
+# Large docs (optional - uncomment if repo gets too large)
+# xelis_silex_full_docs.txt
+
+# Source code (keep the blockchain source if you want, but it's large)
+# Uncomment if you don't want to upload the full blockchain source
+# xelis-blockchain/

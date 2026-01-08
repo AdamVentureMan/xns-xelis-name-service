@@ -1,0 +1,605 @@
+// XNS v3.0 - XELIS Name Service
+// Improved with patterns from XELIS-Forge Proof-of-Concepts
+// Uses require(), .expect(), get_caller() for cleaner code
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+// Time constants
+const ONE_YEAR_SECONDS: u64 = 31536000   // 365 days in seconds
+const GRACE_PERIOD_SECONDS: u64 = 2592000 // 30 days grace period
+
+// Name validation
+const MIN_NAME_LENGTH: u32 = 3
+const MAX_NAME_LENGTH: u32 = 32
+
+// Default fees (initialization only, actual fees in storage)
+const DEFAULT_FEE_SHORT_REG: u64 = 5000000000    // 50 XEL for 3-4 char names
+const DEFAULT_FEE_SHORT_RENEW: u64 = 2000000000  // 20 XEL for short renewals
+const DEFAULT_FEE_NORMAL_REG: u64 = 1000000000   // 10 XEL for 5+ char names
+const DEFAULT_FEE_NORMAL_RENEW: u64 = 500000000  // 5 XEL for normal renewals
+
+// Storage keys
+const KEY_OWNER: string = "owner"
+const KEY_TOTAL_NAMES: string = "total"
+const KEY_NAME_PREFIX: string = "n:"
+const KEY_FEE_SHORT_REG: string = "fsr"
+const KEY_FEE_SHORT_RENEW: string = "fsrn"
+const KEY_FEE_NORMAL_REG: string = "fnr"
+const KEY_FEE_NORMAL_RENEW: string = "fnrn"
+
+// Event IDs
+const EVENT_REGISTERED: u64 = 1
+const EVENT_RENEWED: u64 = 2
+const EVENT_TRANSFERRED: u64 = 3
+const EVENT_WITHDRAWN: u64 = 4
+const EVENT_OWNER_CHANGED: u64 = 5
+const EVENT_TARGET_CHANGED: u64 = 6
+const EVENT_FEES_CHANGED: u64 = 7
+
+// ============================================================================
+// EVENT STRUCTURES (Rich event data like Mineable Token)
+// ============================================================================
+
+struct RegistrationEvent {
+    name: string,
+    owner: Address,
+    expires_at: u64,
+    fee_paid: u64
+}
+
+struct RenewalEvent {
+    name: string,
+    owner: Address,
+    new_expiry: u64,
+    fee_paid: u64
+}
+
+struct TransferEvent {
+    name: string,
+    from: Address,
+    to: Address
+}
+
+struct WithdrawalEvent {
+    recipient: Address,
+    amount: u64
+}
+
+struct FeeChangeEvent {
+    short_reg: u64,
+    short_renew: u64,
+    normal_reg: u64,
+    normal_renew: u64
+}
+
+// ============================================================================
+// DATA STRUCTURES
+// ============================================================================
+
+struct NameRecord {
+    owner: Address,      // Who can transfer/renew/modify
+    target: Address,     // Where resolve() points (hot wallet)
+    expires_at: u64,
+    registered_at: u64
+}
+
+// ============================================================================
+// STORAGE HELPERS (Using .expect() pattern)
+// ============================================================================
+
+fn get_storage() -> Storage {
+    return Storage::new()
+}
+
+fn get_contract_owner() -> Address {
+    let storage = get_storage()
+    return storage.load(KEY_OWNER).expect("ownerNotSet") as Address
+}
+
+fn set_contract_owner(owner: Address) {
+    let storage = get_storage()
+    storage.store(KEY_OWNER, owner)
+}
+
+fn get_total_names() -> u64 {
+    let storage = get_storage()
+    let value = storage.load(KEY_TOTAL_NAMES)
+    if value.is_some() == false {
+        return 0
+    }
+    return value.unwrap() as u64
+}
+
+fn increment_total_names() {
+    let storage = get_storage()
+    let current = get_total_names()
+    storage.store(KEY_TOTAL_NAMES, current + 1)
+}
+
+fn get_name_key(name: string) -> string {
+    return KEY_NAME_PREFIX + name
+}
+
+fn has_name_record(name: string) -> bool {
+    let storage = get_storage()
+    return storage.has(get_name_key(name))
+}
+
+fn get_name_record(name: string) -> NameRecord {
+    let storage = get_storage()
+    let value = storage.load(get_name_key(name))
+    if value.is_some() == false {
+        // Return empty record (caller should check has_name_record first)
+        let empty_addr = get_contract_owner()
+        return NameRecord {
+            owner: empty_addr,
+            target: empty_addr,
+            expires_at: 0,
+            registered_at: 0
+        }
+    }
+    return value.unwrap() as NameRecord
+}
+
+fn set_name_record(name: string, record: NameRecord) {
+    let storage = get_storage()
+    storage.store(get_name_key(name), record)
+}
+
+// ============================================================================
+// FEE HELPERS (Using .expect() with fallback)
+// ============================================================================
+
+fn get_fee_short_reg() -> u64 {
+    let storage = get_storage()
+    let value = storage.load(KEY_FEE_SHORT_REG)
+    if value.is_some() == false {
+        return DEFAULT_FEE_SHORT_REG
+    }
+    return value.unwrap() as u64
+}
+
+fn get_fee_short_renew() -> u64 {
+    let storage = get_storage()
+    let value = storage.load(KEY_FEE_SHORT_RENEW)
+    if value.is_some() == false {
+        return DEFAULT_FEE_SHORT_RENEW
+    }
+    return value.unwrap() as u64
+}
+
+fn get_fee_normal_reg() -> u64 {
+    let storage = get_storage()
+    let value = storage.load(KEY_FEE_NORMAL_REG)
+    if value.is_some() == false {
+        return DEFAULT_FEE_NORMAL_REG
+    }
+    return value.unwrap() as u64
+}
+
+fn get_fee_normal_renew() -> u64 {
+    let storage = get_storage()
+    let value = storage.load(KEY_FEE_NORMAL_RENEW)
+    if value.is_some() == false {
+        return DEFAULT_FEE_NORMAL_RENEW
+    }
+    return value.unwrap() as u64
+}
+
+fn store_all_fees(sr: u64, srn: u64, nr: u64, nrn: u64) {
+    let storage = get_storage()
+    storage.store(KEY_FEE_SHORT_REG, sr)
+    storage.store(KEY_FEE_SHORT_RENEW, srn)
+    storage.store(KEY_FEE_NORMAL_REG, nr)
+    storage.store(KEY_FEE_NORMAL_RENEW, nrn)
+}
+
+// ============================================================================
+// VALIDATION HELPERS
+// ============================================================================
+
+fn is_valid_char(c: u8) -> bool {
+    // a-z: 97-122
+    if c >= 97 && c <= 122 {
+        return true
+    }
+    // 0-9: 48-57
+    if c >= 48 && c <= 57 {
+        return true
+    }
+    // hyphen: 45
+    if c == 45 {
+        return true
+    }
+    return false
+}
+
+fn is_valid_name(name: string) -> bool {
+    let len = name.len()
+    
+    if len < MIN_NAME_LENGTH {
+        return false
+    }
+    if len > MAX_NAME_LENGTH {
+        return false
+    }
+    
+    let bytes = name.to_bytes()
+    let i: u32 = 0
+    
+    while i < len {
+        let c = bytes.get(i).expect("byteAccess")
+        
+        if is_valid_char(c) == false {
+            return false
+        }
+        
+        // Hyphen cannot be at start or end
+        if c == 45 {
+            if i == 0 {
+                return false
+            }
+            if i == len - 1 {
+                return false
+            }
+        }
+        
+        i = i + 1
+    }
+    
+    return true
+}
+
+fn is_short_name(name: string) -> bool {
+    return name.len() <= 4
+}
+
+fn get_registration_fee(name: string) -> u64 {
+    if is_short_name(name) {
+        return get_fee_short_reg()
+    }
+    return get_fee_normal_reg()
+}
+
+fn get_renewal_fee(name: string) -> u64 {
+    if is_short_name(name) {
+        return get_fee_short_renew()
+    }
+    return get_fee_normal_renew()
+}
+
+fn current_time() -> u64 {
+    return Block::current().timestamp()
+}
+
+fn get_deposit_amount() -> u64 {
+    let deposit = get_deposit_for_asset(Hash::zero())
+    if deposit.is_some() == false {
+        return 0
+    }
+    return deposit.unwrap()
+}
+
+fn is_name_available(name: string) -> bool {
+    if has_name_record(name) == false {
+        return true
+    }
+    
+    let record = get_name_record(name)
+    let now = current_time()
+    let grace_end = record.expires_at + GRACE_PERIOD_SECONDS
+    
+    return now > grace_end
+}
+
+fn is_in_grace_period(name: string) -> bool {
+    if has_name_record(name) == false {
+        return false
+    }
+    
+    let record = get_name_record(name)
+    let now = current_time()
+    
+    if record.expires_at >= now {
+        return false
+    }
+    
+    let grace_end = record.expires_at + GRACE_PERIOD_SECONDS
+    return now <= grace_end
+}
+
+fn refund_excess(sender: Address, payment: u64, fee: u64) -> bool {
+    if payment <= fee {
+        return true
+    }
+    
+    let change = payment - fee
+    return transfer(sender, change, Hash::zero())
+}
+
+// ============================================================================
+// CONSTRUCTOR (Using get_caller pattern)
+// ============================================================================
+
+hook constructor() -> u64 {
+    let caller = get_caller().expect("noCaller")
+    
+    // Set contract owner
+    set_contract_owner(caller)
+    
+    // Initialize counter
+    let storage = get_storage()
+    let zero: u64 = 0
+    storage.store(KEY_TOTAL_NAMES, zero)
+    
+    // Initialize fees
+    store_all_fees(
+        DEFAULT_FEE_SHORT_REG,
+        DEFAULT_FEE_SHORT_RENEW,
+        DEFAULT_FEE_NORMAL_REG,
+        DEFAULT_FEE_NORMAL_RENEW
+    )
+    
+    return 0
+}
+
+// ============================================================================
+// PUBLIC ENTRY FUNCTIONS (Using require pattern)
+// ============================================================================
+
+// Register a new name
+entry register(name: string) {
+    let sender = get_caller().expect("noCaller")
+    
+    // Validate
+    require(is_valid_name(name), "invalidName")
+    require(is_name_available(name), "nameNotAvailable")
+    
+    // Check payment
+    let payment = get_deposit_amount()
+    let fee = get_registration_fee(name)
+    require(payment >= fee, "insufficientPayment")
+    
+    // Refund excess
+    require(refund_excess(sender, payment, fee), "refundFailed")
+    
+    // Create record
+    let now = current_time()
+    let expiry = now + ONE_YEAR_SECONDS
+    
+    let record = NameRecord {
+        owner: sender,
+        target: sender,
+        expires_at: expiry,
+        registered_at: now
+    }
+    set_name_record(name, record)
+    
+    // Increment counter
+    increment_total_names()
+    
+    // Fire rich event
+    let event = RegistrationEvent {
+        name: name,
+        owner: sender,
+        expires_at: expiry,
+        fee_paid: fee
+    }
+    fire_event(EVENT_REGISTERED, event)
+    
+    return 0
+}
+
+// Renew a name (owner only, works during active and grace period)
+entry renew(name: string) {
+    let sender = get_caller().expect("noCaller")
+    
+    require(has_name_record(name), "nameNotFound")
+    
+    let record = get_name_record(name)
+    require(record.owner == sender, "notOwner")
+    
+    let now = current_time()
+    let grace_end = record.expires_at + GRACE_PERIOD_SECONDS
+    require(now <= grace_end, "expiredBeyondGrace")
+    
+    // Check payment
+    let payment = get_deposit_amount()
+    let fee = get_renewal_fee(name)
+    require(payment >= fee, "insufficientPayment")
+    
+    // Refund excess
+    require(refund_excess(sender, payment, fee), "refundFailed")
+    
+    // Calculate new expiry
+    let new_expiry: u64 = 0
+    if record.expires_at > now {
+        new_expiry = record.expires_at + ONE_YEAR_SECONDS
+    } else {
+        new_expiry = now + ONE_YEAR_SECONDS
+    }
+    
+    // Update record
+    let new_record = NameRecord {
+        owner: record.owner,
+        target: record.target,
+        expires_at: new_expiry,
+        registered_at: record.registered_at
+    }
+    set_name_record(name, new_record)
+    
+    // Fire rich event
+    let event = RenewalEvent {
+        name: name,
+        owner: sender,
+        new_expiry: new_expiry,
+        fee_paid: fee
+    }
+    fire_event(EVENT_RENEWED, event)
+    
+    return 0
+}
+
+// Transfer ownership (resets target to new owner)
+entry transfer_name(name: string, new_owner: Address) {
+    let sender = get_caller().expect("noCaller")
+    
+    require(has_name_record(name), "nameNotFound")
+    
+    let record = get_name_record(name)
+    require(record.owner == sender, "notOwner")
+    
+    let now = current_time()
+    require(record.expires_at >= now, "nameExpired")
+    
+    // Update (reset target for security)
+    let new_record = NameRecord {
+        owner: new_owner,
+        target: new_owner,
+        expires_at: record.expires_at,
+        registered_at: record.registered_at
+    }
+    set_name_record(name, new_record)
+    
+    // Fire rich event
+    let event = TransferEvent {
+        name: name,
+        from: sender,
+        to: new_owner
+    }
+    fire_event(EVENT_TRANSFERRED, event)
+    
+    return 0
+}
+
+// Set target address (where resolve points)
+entry set_target(name: string, new_target: Address) {
+    let sender = get_caller().expect("noCaller")
+    
+    require(has_name_record(name), "nameNotFound")
+    
+    let record = get_name_record(name)
+    require(record.owner == sender, "notOwner")
+    
+    let now = current_time()
+    require(record.expires_at >= now, "nameExpired")
+    
+    // Update target only
+    let new_record = NameRecord {
+        owner: record.owner,
+        target: new_target,
+        expires_at: record.expires_at,
+        registered_at: record.registered_at
+    }
+    set_name_record(name, new_record)
+    
+    fire_event(EVENT_TARGET_CHANGED, name)
+    
+    return 0
+}
+
+// Check availability
+// Returns: 0=available, 1=invalid, 2=taken, 3=grace period
+entry check_available(name: string) -> u64 {
+    if is_valid_name(name) == false {
+        return 1
+    }
+    
+    if is_name_available(name) {
+        return 0
+    }
+    
+    if is_in_grace_period(name) {
+        return 3
+    }
+    
+    return 2
+}
+
+// Resolve name (check if valid)
+// Returns: 0=valid, 1=not found, 2=expired
+entry resolve(name: string) -> u64 {
+    if has_name_record(name) == false {
+        return 1
+    }
+    
+    let record = get_name_record(name)
+    let now = current_time()
+    
+    if record.expires_at < now {
+        return 2
+    }
+    
+    return 0
+}
+
+// Get registration price
+entry get_price(name: string) -> u64 {
+    if is_valid_name(name) == false {
+        return 0
+    }
+    return get_registration_fee(name)
+}
+
+// Get renewal price
+entry get_renew_price(name: string) -> u64 {
+    if is_valid_name(name) == false {
+        return 0
+    }
+    return get_renewal_fee(name)
+}
+
+// ============================================================================
+// OWNER FUNCTIONS
+// ============================================================================
+
+// Withdraw accumulated fees
+entry withdraw() {
+    let sender = get_caller().expect("noCaller")
+    require(sender == get_contract_owner(), "notContractOwner")
+    
+    let balance = get_balance_for_asset(Hash::zero()).expect("noBalance")
+    require(balance > 0, "nothingToWithdraw")
+    
+    require(transfer(sender, balance, Hash::zero()), "transferFailed")
+    
+    let event = WithdrawalEvent {
+        recipient: sender,
+        amount: balance
+    }
+    fire_event(EVENT_WITHDRAWN, event)
+    
+    return 0
+}
+
+// Update fees
+entry set_fees(short_reg: u64, short_renew: u64, normal_reg: u64, normal_renew: u64) {
+    let sender = get_caller().expect("noCaller")
+    require(sender == get_contract_owner(), "notContractOwner")
+    
+    store_all_fees(short_reg, short_renew, normal_reg, normal_renew)
+    
+    let event = FeeChangeEvent {
+        short_reg: short_reg,
+        short_renew: short_renew,
+        normal_reg: normal_reg,
+        normal_renew: normal_renew
+    }
+    fire_event(EVENT_FEES_CHANGED, event)
+    
+    return 0
+}
+
+// Transfer contract ownership
+entry transfer_ownership(new_owner: Address) {
+    let sender = get_caller().expect("noCaller")
+    require(sender == get_contract_owner(), "notContractOwner")
+    
+    set_contract_owner(new_owner)
+    fire_event(EVENT_OWNER_CHANGED, new_owner)
+    
+    return 0
+}
+
