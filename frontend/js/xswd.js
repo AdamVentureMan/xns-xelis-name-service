@@ -231,15 +231,20 @@ class XSWDClient {
     }
 
     generateAppId() {
-        // Generate a consistent app ID based on origin
-        const origin = window.location.origin || 'xns-local';
-        let hash = 0;
-        for (let i = 0; i < origin.length; i++) {
-            const char = origin.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+        // Generate a 64-character hex string (required by XSWD protocol)
+        // This is a deterministic ID based on the app identity
+        const chars = '0123456789abcdef';
+        const seed = 'xns-xelis-name-service-dapp';
+        
+        let result = '';
+        for (let i = 0; i < 64; i++) {
+            // Use seed characters to generate deterministic hex
+            const seedChar = seed.charCodeAt(i % seed.length);
+            const index = (seedChar + i * 7) % 16;
+            result += chars[index];
         }
-        return Math.abs(hash).toString(16).padStart(16, '0');
+        
+        return result;
     }
 }
 
