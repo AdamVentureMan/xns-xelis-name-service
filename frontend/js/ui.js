@@ -233,9 +233,12 @@ async function registerName() {
             'Submitting registration... Please approve in your wallet.');
 
         const result = await xnsContract.register(name, targetAddress);
+        
+        // Extract tx hash from result (could be string or object)
+        const txHash = typeof result === 'string' ? result : (result?.hash || result?.tx_hash || JSON.stringify(result));
 
         showResult('register-result', 'success', 
-            `Name "${name}" registered! Transaction: ${truncateHash(result)}`);
+            `Name "${name}" registered! Transaction: ${truncateHash(txHash)}`);
 
         // Clear form
         document.getElementById('name-input').value = '';
