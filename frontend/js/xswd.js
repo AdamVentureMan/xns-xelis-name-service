@@ -218,20 +218,38 @@ class XSWDClient {
             };
         }
 
-        // Format parameters as ValueCell objects
+        // Format parameters as ValueCell objects (adjacently tagged with `type`/`value`)
         const formattedParams = parameters.map(param => {
             if (typeof param === 'string') {
-                return { type: "primitive", value: { type: "string", value: param } };
+                return {
+                    type: "primitive",
+                    value: {
+                        type: "string",
+                        value: param
+                    }
+                };
             } else if (typeof param === 'number') {
-                return { type: "primitive", value: { type: "u64", value: param } };
+                return {
+                    type: "primitive",
+                    value: {
+                        type: "u64",
+                        value: param
+                    }
+                };
             } else if (typeof param === 'boolean') {
-                return { type: "primitive", value: { type: "bool", value: param } };
+                return {
+                    type: "primitive",
+                    value: {
+                        type: "bool",
+                        value: param
+                    }
+                };
             }
             // Already formatted
             return param;
         });
 
-        return this.request('wallet.build_transaction', {
+        const txParams = {
             invoke_contract: {
                 contract: contract,
                 max_gas: maxGas,
@@ -241,7 +259,9 @@ class XSWDClient {
                 permission: "all"
             },
             broadcast: true
-        });
+        };
+        console.log('XSWD: build_transaction params:', JSON.stringify(txParams, null, 2));
+        return this.request('wallet.build_transaction', txParams);
     }
 
     // Daemon RPC methods (proxied through wallet)
