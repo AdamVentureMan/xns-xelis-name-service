@@ -155,36 +155,21 @@ async function checkAvailability() {
         const price = xnsReader.getPrice(name);
         let isAvailable = true;
 
-        // Try to check via wallet XSWD if connected (routes through daemon)
+        // Query public daemon directly (works without wallet!)
         // Contract stores names with "n:" prefix
-        if (walletConnected && xswdClient) {
-            try {
-                // Use daemon RPC through XSWD - query with "n:" prefix
-                const result = await xswdClient.request('node.get_contract_data', {
-                    contract: CONTRACT_ADDRESS,
-                    key: { type: "primitive", value: { type: "string", value: `n:${name}` } }
-                });
-                // If we got a result, the name exists (taken)
-                isAvailable = false;
-            } catch (e) {
-                // "No data found" or "-32004" means name is available!
-                if (e.message.includes('No data found') || e.message.includes('-32004') || e.message.includes('not found')) {
-                    isAvailable = true;
-                } else {
-                    throw e;
-                }
+        try {
+            const result = await daemonRPC.getContractData(CONTRACT_ADDRESS, 
+                { type: "primitive", value: { type: "string", value: `n:${name}` } }
+            );
+            // If we got a result, the name exists (taken)
+            isAvailable = false;
+        } catch (e) {
+            // "No data found" or "-32004" means name is available!
+            if (e.message.includes('No data found') || e.message.includes('-32004') || e.message.includes('not found')) {
+                isAvailable = true;
+            } else {
+                throw e;
             }
-        } else {
-            // No wallet - show estimated price but can't verify
-            showResult('availability-result', 'info', 
-                `Connect your wallet to check if "${name}" is available. Estimated price: ${price.xel} XEL`);
-            
-            registerNameEl.value = name;
-            registerPrice.textContent = `${price.xel} XEL`;
-            registerSection.classList.remove('hidden');
-            showResult('register-result', 'info', 
-                'Connect your wallet to check availability and register.');
-            return;
         }
 
         if (isAvailable) {
@@ -267,27 +252,18 @@ async function resolveName() {
         return;
     }
 
-    // Need wallet connection to query
-    if (!walletConnected || !xswdClient) {
-        showResult('resolve-result', 'error', 
-            'Connect your wallet to resolve names.');
-        return;
-    }
-
     try {
         resolveBtn.disabled = true;
         resolveBtn.textContent = 'Resolving...';
         showResult('resolve-result', 'info', `Resolving "${name}"...`);
 
-        // Use daemon RPC through XSWD - query with "n:" prefix
-        const result = await xswdClient.request('node.get_contract_data', {
-            contract: CONTRACT_ADDRESS,
-            key: { type: "primitive", value: { type: "string", value: `n:${name}` } }
-        });
+        // Query public daemon directly (works without wallet!)
+        const result = await daemonRPC.getContractData(CONTRACT_ADDRESS, 
+            { type: "primitive", value: { type: "string", value: `n:${name}` } }
+        );
 
         if (result && result.data) {
             // Parse the result - it's an object array: [owner, target, expires_at, registered_at]
-            // The value is in result.data.value (array of ValueCells)
             const data = result.data;
             let targetAddress = 'Unknown';
             

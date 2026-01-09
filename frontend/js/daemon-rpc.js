@@ -3,10 +3,8 @@
 // No wallet required - anyone can query the blockchain
 
 const TESTNET_NODES = [
-    "http://127.0.0.1:8080/json_rpc",       // Local daemon (try first)
-    "http://localhost:8080/json_rpc",        // Local daemon (alternative)
-    "http://74.208.251.149:8080/json_rpc",  // US testnet seed node (may have CORS issues)
-    "http://76.216.16.66:8080/json_rpc"      // Backup node (may have CORS issues)
+    "https://testnet-node.xelis.io/json_rpc",  // Official public testnet (HTTPS!)
+    "http://127.0.0.1:8080/json_rpc",          // Local daemon fallback
 ];
 
 const MAINNET_NODES = [
