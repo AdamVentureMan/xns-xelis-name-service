@@ -156,12 +156,13 @@ async function checkAvailability() {
         let isAvailable = true;
 
         // Try to check via wallet XSWD if connected (routes through daemon)
+        // Contract stores names with "n:" prefix
         if (walletConnected && xswdClient) {
             try {
-                // Use daemon RPC through XSWD
+                // Use daemon RPC through XSWD - query with "n:" prefix
                 const result = await xswdClient.request('node.get_contract_data', {
                     contract: CONTRACT_ADDRESS,
-                    key: { type: "primitive", value: { type: "string", value: name } }
+                    key: { type: "primitive", value: { type: "string", value: `n:${name}` } }
                 });
                 // If we got a result, the name exists (taken)
                 isAvailable = false;
@@ -278,17 +279,28 @@ async function resolveName() {
         resolveBtn.textContent = 'Resolving...';
         showResult('resolve-result', 'info', `Resolving "${name}"...`);
 
-        // Use daemon RPC through XSWD
+        // Use daemon RPC through XSWD - query with "n:" prefix
         const result = await xswdClient.request('node.get_contract_data', {
             contract: CONTRACT_ADDRESS,
-            key: { type: "primitive", value: { type: "string", value: name } }
+            key: { type: "primitive", value: { type: "string", value: `n:${name}` } }
         });
 
-        if (result) {
-            // Parse the result - it should contain the registration data
-            const address = result.target || result.owner || JSON.stringify(result);
+        if (result && result.data) {
+            // Parse the result - it's an object array: [owner, target, expires_at, registered_at]
+            // The value is in result.data.value (array of ValueCells)
+            const data = result.data;
+            let targetAddress = 'Unknown';
+            
+            if (data.type === 'object' && Array.isArray(data.value)) {
+                // Second element is target address
+                const targetCell = data.value[1];
+                if (targetCell?.value?.value?.value) {
+                    targetAddress = targetCell.value.value.value;
+                }
+            }
+            
             showResult('resolve-result', 'success', 
-                `"${name}" resolves to: ${address}`);
+                `"${name}" resolves to: ${targetAddress}`);
         } else {
             showResult('resolve-result', 'error', 
                 `"${name}" is not registered.`);
