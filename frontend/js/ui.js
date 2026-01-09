@@ -130,7 +130,7 @@ async function connectWallet() {
         
         let errorMsg = error.message;
         if (error.message.includes('WebSocket')) {
-            errorMsg = 'Cannot connect to XELIS wallet. Make sure your wallet is running and XSWD is enabled (run: start_xswd_server)';
+            errorMsg = 'Cannot connect to XELIS wallet. Make sure your wallet is running and XSWD is enabled (run: start_xswd)';
         }
 
         showResult('availability-result', 'error', errorMsg);

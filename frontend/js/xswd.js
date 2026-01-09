@@ -29,10 +29,10 @@ class XSWDClient {
                     if (this.ws.readyState !== WebSocket.OPEN) {
                         this.ws.close();
                         reject(new Error(
-                            'Connection timeout. Make sure:\n' +
-                            '1. XELIS wallet is running\n' +
-                            '2. XSWD server is enabled (run: start_xswd_server in wallet)\n' +
-                            '3. You are accessing this page via HTTP (not HTTPS) for local testing'
+                    'Connection timeout. Make sure:\n' +
+                    '1. XELIS wallet is running\n' +
+                    '2. XSWD server is enabled (run: start_xswd in wallet)\n' +
+                    '3. You are accessing this page via HTTP (not HTTPS) for local testing'
                         ));
                     }
                 }, 10000);
@@ -63,9 +63,9 @@ class XSWDClient {
                         errorMsg += '\n\nYou are on HTTPS which blocks local WebSocket connections. ' +
                                    'For testing, open this page via HTTP or run locally.';
                     } else {
-                        errorMsg += '\n\nMake sure:\n' +
-                                   '1. XELIS wallet is running\n' +
-                                   '2. Run "start_xswd_server" in your wallet';
+                    errorMsg += '\n\nMake sure:\n' +
+                               '1. XELIS wallet is running\n' +
+                               '2. Run "start_xswd" in your wallet';
                     }
                     
                     reject(new Error(errorMsg));
