@@ -355,8 +355,9 @@ function formatError(error, context = '') {
     // Common error patterns and friendly messages
     const errorMap = {
         'No data found': 'This name is not registered yet.',
-        'insufficient balance': 'Not enough XEL in your wallet. Please add more funds.',
-        'Insufficient balance': 'Not enough XEL in your wallet. Please add more funds.',
+        'insufficient balance': 'Not enough XEL in your wallet. Mine more testnet coins!',
+        'Insufficient balance': 'Not enough XEL in your wallet. Mine more testnet coins!',
+        'not enough funds': 'Not enough XEL in your wallet. Mine more testnet coins!',
         'already registered': 'This name is already taken by someone else.',
         'name too short': 'Name must be at least 3 characters long.',
         'name too long': 'Name must be 32 characters or less.',
@@ -370,6 +371,14 @@ function formatError(error, context = '') {
         'Invalid params': 'There was a technical error. Please try again or contact support.',
         'Method': 'Wallet communication error. Please reconnect.',
     };
+    
+    // Check for "not enough funds" with amounts and convert to human readable
+    const fundsMatch = msg.match(/required:\s*(\d+),\s*available:\s*(\d+)/i);
+    if (fundsMatch) {
+        const required = (parseInt(fundsMatch[1]) / 100000000).toFixed(2);
+        const available = (parseInt(fundsMatch[2]) / 100000000).toFixed(2);
+        return `Not enough XEL! You need ${required} XEL but only have ${available} XEL. Mine more testnet coins!`;
+    }
 
     for (const [pattern, friendly] of Object.entries(errorMap)) {
         if (msg.includes(pattern)) {
