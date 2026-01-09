@@ -87,14 +87,15 @@ class XNSContract {
         const isShort = name.length >= 3 && name.length <= 4;
         const price = isShort ? 50 * ATOMIC_UNIT : 10 * ATOMIC_UNIT;
         
-        const args = this.serializeArgs(ENTRY_IDS.register, [name]);
+        // Pass name as parameter (will be formatted as ValueCell by xswd.js)
+        const params = [name];
         const deposits = {};
         deposits[XEL_ASSET] = { amount: price };
         
         const result = await this.xswd.invokeContract(
             CONTRACT_ADDRESS,
             ENTRY_IDS.register,
-            args,
+            params,
             deposits,
             100000000 // max_gas
         );

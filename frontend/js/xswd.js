@@ -98,7 +98,7 @@ class XSWDClient {
             permissions: [
                 "get_balance",
                 "get_address",
-                "invoke_contract"
+                "build_transaction"
             ]
         };
 
@@ -113,9 +113,11 @@ class XSWDClient {
             const registrationHandler = (event) => {
                 try {
                     const response = JSON.parse(event.data);
+                    console.log('XSWD: Received response:', JSON.stringify(response));
                     
                     // Check for successful registration
-                    if (response.id === null && response.result === true) {
+                    // Wallet returns { result: { success: true, message: "..." } }
+                    if (response.result === true || response.result?.success === true) {
                         clearTimeout(timeout);
                         this.ws.removeEventListener('message', registrationHandler);
                         this.connected = true;
@@ -128,11 +130,13 @@ class XSWDClient {
                     if (response.error) {
                         clearTimeout(timeout);
                         this.ws.removeEventListener('message', registrationHandler);
-                        reject(new Error(response.error.message || 'Registration rejected'));
+                        const errMsg = response.error.message || response.error || 'Registration rejected';
+                        console.error('XSWD: Registration error:', errMsg);
+                        reject(new Error(errMsg));
                         return;
                     }
                 } catch (e) {
-                    // Ignore parse errors during registration
+                    console.error('XSWD: Parse error:', e, 'Raw data:', event.data);
                 }
             };
 
@@ -203,13 +207,40 @@ class XSWDClient {
         return this.request('wallet.get_balance', { asset });
     }
 
-    async invokeContract(contract, entry, args = [], deposits = {}, max_gas = 100000000) {
-        return this.request('wallet.invoke_contract', {
-            contract,
-            entry,
-            args,
-            deposits,
-            max_gas
+    async invokeContract(contract, entryId, parameters = [], deposits = {}, maxGas = 100000000) {
+        // Build transaction with invoke_contract type
+        // Format deposits for XELIS: { "asset_hash": { amount: X, private: false } }
+        const formattedDeposits = {};
+        for (const [asset, data] of Object.entries(deposits)) {
+            formattedDeposits[asset] = {
+                amount: data.amount,
+                private: false
+            };
+        }
+
+        // Format parameters as ValueCell objects
+        const formattedParams = parameters.map(param => {
+            if (typeof param === 'string') {
+                return { type: "primitive", value: { type: "string", value: param } };
+            } else if (typeof param === 'number') {
+                return { type: "primitive", value: { type: "u64", value: param } };
+            } else if (typeof param === 'boolean') {
+                return { type: "primitive", value: { type: "bool", value: param } };
+            }
+            // Already formatted
+            return param;
+        });
+
+        return this.request('wallet.build_transaction', {
+            invoke_contract: {
+                contract: contract,
+                max_gas: maxGas,
+                entry_id: entryId,
+                parameters: formattedParams,
+                deposits: formattedDeposits,
+                permission: "all"
+            },
+            broadcast: true
         });
     }
 
@@ -231,19 +262,13 @@ class XSWDClient {
     }
 
     generateAppId() {
-        // Generate a 64-character hex string (required by XSWD protocol)
-        // This is a deterministic ID based on the app identity
+        // Generate a random 64-character hex string (required by XSWD protocol)
+        // Random ID allows multiple connections/reconnections
         const chars = '0123456789abcdef';
-        const seed = 'xns-xelis-name-service-dapp';
-        
         let result = '';
         for (let i = 0; i < 64; i++) {
-            // Use seed characters to generate deterministic hex
-            const seedChar = seed.charCodeAt(i % seed.length);
-            const index = (seedChar + i * 7) % 16;
-            result += chars[index];
+            result += chars[Math.floor(Math.random() * 16)];
         }
-        
         return result;
     }
 }

@@ -26,19 +26,10 @@ async function updateConnectionStatus() {
     const statusBadge = document.getElementById('connection-status');
     const statusText = document.getElementById('status-text');
     
-    try {
-        const ping = await daemonRPC.ping();
-        if (ping.connected) {
-            statusBadge.className = 'status-badge status-public';
-            statusText.textContent = `Public Mode - ${ping.network} (Height: ${ping.topoheight})`;
-        } else {
-            statusBadge.className = 'status-badge status-offline';
-            statusText.textContent = 'Offline - Cannot connect to network';
-        }
-    } catch (error) {
-        statusBadge.className = 'status-badge status-offline';
-        statusText.textContent = 'Offline - Network error';
-    }
+    // Default to showing "connect wallet" message
+    // Direct daemon RPC from browser is blocked by CORS
+    statusBadge.className = 'status-badge status-offline';
+    statusText.textContent = 'Connect wallet to use';
 }
 
 // Set up all event listeners
@@ -139,12 +130,12 @@ async function connectWallet() {
     }
 }
 
-// Check name availability (public - no wallet needed)
+// Check name availability
 async function checkAvailability() {
     const nameInput = document.getElementById('name-input');
     const checkBtn = document.getElementById('check-btn');
     const registerSection = document.getElementById('register-section');
-    const registerName = document.getElementById('register-name');
+    const registerNameEl = document.getElementById('register-name');
     const registerPrice = document.getElementById('register-price');
     
     const name = nameInput.value.trim().toLowerCase();
@@ -161,23 +152,53 @@ async function checkAvailability() {
         checkBtn.textContent = 'Checking...';
         showResult('availability-result', 'info', `Checking availability for "${name}"...`);
 
-        // Use public daemon to check (doesn't require wallet)
-        const isAvailable = await xnsReader.checkAvailability(name);
         const price = xnsReader.getPrice(name);
+        let isAvailable = true;
+
+        // Try to check via wallet XSWD if connected (routes through daemon)
+        if (walletConnected && xswdClient) {
+            try {
+                // Use daemon RPC through XSWD
+                const result = await xswdClient.request('node.get_contract_data', {
+                    contract: CONTRACT_ADDRESS,
+                    key: { type: "primitive", value: { type: "string", value: name } }
+                });
+                // If we got a result, the name exists (taken)
+                isAvailable = false;
+            } catch (e) {
+                // "No data found" or "-32004" means name is available!
+                if (e.message.includes('No data found') || e.message.includes('-32004') || e.message.includes('not found')) {
+                    isAvailable = true;
+                } else {
+                    throw e;
+                }
+            }
+        } else {
+            // No wallet - show estimated price but can't verify
+            showResult('availability-result', 'info', 
+                `Connect your wallet to check if "${name}" is available. Estimated price: ${price.xel} XEL`);
+            
+            registerNameEl.value = name;
+            registerPrice.textContent = `${price.xel} XEL`;
+            registerSection.classList.remove('hidden');
+            showResult('register-result', 'info', 
+                'Connect your wallet to check availability and register.');
+            return;
+        }
 
         if (isAvailable) {
             showResult('availability-result', 'success', 
-                `"${name}" is available! Price: ${price.xel} XEL`);
+                `✓ "${name}" is available! Price: ${price.xel} XEL`);
             
-            // Show register section
-            registerName.value = name;
+            // Show register section with the name
+            registerNameEl.value = name;
             registerPrice.textContent = `${price.xel} XEL`;
             registerSection.classList.remove('hidden');
-
-            if (!walletConnected) {
-                showResult('register-result', 'info', 
-                    'Connect your wallet to register this name.');
-            }
+            
+            // Scroll to register section smoothly
+            setTimeout(() => {
+                registerSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
         } else {
             showResult('availability-result', 'error', 
                 `"${name}" is already taken.`);
@@ -186,14 +207,7 @@ async function checkAvailability() {
 
     } catch (error) {
         console.error('Check availability error:', error);
-        
-        // If public node fails, show helpful message
-        if (error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
-            showResult('availability-result', 'error', 
-                'Cannot reach network. Connect your wallet to check availability.');
-        } else {
-            showResult('availability-result', 'error', `Error: ${error.message}`);
-        }
+        showResult('availability-result', 'error', formatError(error, 'check'));
     } finally {
         checkBtn.disabled = false;
         checkBtn.textContent = 'Check Availability';
@@ -229,14 +243,14 @@ async function registerName() {
 
     } catch (error) {
         console.error('Register error:', error);
-        showResult('register-result', 'error', `Registration failed: ${error.message}`);
+        showResult('register-result', 'error', formatError(error, 'register'));
     } finally {
         registerBtn.disabled = false;
         registerBtn.textContent = 'Register Name';
     }
 }
 
-// Resolve name (public - no wallet needed)
+// Resolve name
 async function resolveName() {
     const resolveInput = document.getElementById('resolve-input');
     const resolveBtn = document.getElementById('resolve-btn');
@@ -249,16 +263,29 @@ async function resolveName() {
         return;
     }
 
+    // Need wallet connection to query
+    if (!walletConnected || !xswdClient) {
+        showResult('resolve-result', 'error', 
+            'Connect your wallet to resolve names.');
+        return;
+    }
+
     try {
         resolveBtn.disabled = true;
         resolveBtn.textContent = 'Resolving...';
         showResult('resolve-result', 'info', `Resolving "${name}"...`);
 
-        const result = await xnsReader.resolveName(name);
+        // Use daemon RPC through XSWD
+        const result = await xswdClient.request('node.get_contract_data', {
+            contract: CONTRACT_ADDRESS,
+            key: { type: "primitive", value: { type: "string", value: name } }
+        });
 
         if (result) {
+            // Parse the result - it should contain the registration data
+            const address = result.target || result.owner || JSON.stringify(result);
             showResult('resolve-result', 'success', 
-                `"${name}" resolves to: ${result.target || result.owner || JSON.stringify(result)}`);
+                `"${name}" resolves to: ${address}`);
         } else {
             showResult('resolve-result', 'error', 
                 `"${name}" is not registered.`);
@@ -267,11 +294,9 @@ async function resolveName() {
     } catch (error) {
         console.error('Resolve error:', error);
         
-        if (error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
-            showResult('resolve-result', 'error', 
-                'Cannot reach network. Try connecting your wallet.');
-        } else if (error.message.includes('not found')) {
-            showResult('resolve-result', 'error', `"${name}" is not registered.`);
+        // "No data found" or "-32004" means name is not registered
+        if (error.message.includes('No data found') || error.message.includes('-32004') || error.message.includes('not found')) {
+            showResult('resolve-result', 'info', `"${name}" is not registered yet. You can register it!`);
         } else {
             showResult('resolve-result', 'error', `Error: ${error.message}`);
         }
@@ -306,4 +331,41 @@ function truncateAddress(address) {
 function truncateHash(hash) {
     if (!hash || hash.length < 20) return hash;
     return `${hash.substring(0, 8)}...${hash.substring(hash.length - 8)}`;
+}
+
+// Helper: Format errors to human-readable messages
+function formatError(error, context = '') {
+    const msg = error.message || error.toString();
+    
+    // Common error patterns and friendly messages
+    const errorMap = {
+        'No data found': 'This name is not registered yet.',
+        'insufficient balance': 'Not enough XEL in your wallet. Please add more funds.',
+        'Insufficient balance': 'Not enough XEL in your wallet. Please add more funds.',
+        'already registered': 'This name is already taken by someone else.',
+        'name too short': 'Name must be at least 3 characters long.',
+        'name too long': 'Name must be 32 characters or less.',
+        'invalid characters': 'Name can only contain lowercase letters, numbers, and underscores.',
+        'expired': 'This name registration has expired.',
+        'not owner': 'You do not own this name.',
+        'Permission denied': 'You denied the transaction in your wallet.',
+        'rejected': 'Transaction was rejected. Please try again.',
+        'timeout': 'Request timed out. Please check your wallet and try again.',
+        'WebSocket': 'Connection to wallet lost. Please reconnect.',
+        'Invalid params': 'There was a technical error. Please try again or contact support.',
+        'Method': 'Wallet communication error. Please reconnect.',
+    };
+
+    for (const [pattern, friendly] of Object.entries(errorMap)) {
+        if (msg.includes(pattern)) {
+            return friendly;
+        }
+    }
+
+    // If no pattern matched, return a cleaner version
+    if (msg.includes('Server returned error')) {
+        return 'Server error. Please try again in a moment.';
+    }
+
+    return `Error: ${msg}`;
 }
