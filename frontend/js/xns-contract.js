@@ -6,19 +6,19 @@ const CONTRACT_ADDRESS = "eb7a0d88c570da29201f26d29896a9b6e604c5ea9259b596cea1e9
 const XEL_ASSET = "0000000000000000000000000000000000000000000000000000000000000000";
 const ATOMIC_UNIT = 100000000;
 
-// Entry function IDs (from contract compilation order)
+// Entry function IDs (from deployed contract chunk IDs)
 const ENTRY_IDS = {
-    register: 0,        // First entry function
-    renew: 1,
-    transfer_name: 2,
-    set_target: 3,
-    check_available: 4,
-    resolve: 5,
-    get_price: 6,
-    get_renew_price: 7,
-    withdraw: 8,
-    set_fees: 9,
-    transfer_ownership: 10
+    register: 25,
+    renew: 26,
+    transfer_name: 27,
+    set_target: 28,
+    check_available: 29,
+    resolve: 30,
+    get_price: 31,
+    get_renew_price: 32,
+    withdraw: 33,
+    set_fees: 34,
+    transfer_ownership: 35
 };
 
 class XNSContract {
