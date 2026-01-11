@@ -105,11 +105,7 @@ fn set_contract_owner(owner: Address) {
 
 fn get_total_names() -> u64 {
     let storage = get_storage()
-    let value = storage.load(KEY_TOTAL_NAMES)
-    if value.is_some() == false {
-        return 0
-    }
-    return value.unwrap() as u64
+    return storage.load(KEY_TOTAL_NAMES).unwrap_or(0)
 }
 
 fn increment_total_names() {
@@ -154,38 +150,22 @@ fn set_name_record(name: string, record: NameRecord) {
 
 fn get_fee_short_reg() -> u64 {
     let storage = get_storage()
-    let value = storage.load(KEY_FEE_SHORT_REG)
-    if value.is_some() == false {
-        return DEFAULT_FEE_SHORT_REG
-    }
-    return value.unwrap() as u64
+    return storage.load(KEY_FEE_SHORT_REG).unwrap_or(DEFAULT_FEE_SHORT_REG)
 }
 
 fn get_fee_short_renew() -> u64 {
     let storage = get_storage()
-    let value = storage.load(KEY_FEE_SHORT_RENEW)
-    if value.is_some() == false {
-        return DEFAULT_FEE_SHORT_RENEW
-    }
-    return value.unwrap() as u64
+    return storage.load(KEY_FEE_SHORT_RENEW).unwrap_or(DEFAULT_FEE_SHORT_RENEW)
 }
 
 fn get_fee_normal_reg() -> u64 {
     let storage = get_storage()
-    let value = storage.load(KEY_FEE_NORMAL_REG)
-    if value.is_some() == false {
-        return DEFAULT_FEE_NORMAL_REG
-    }
-    return value.unwrap() as u64
+    return storage.load(KEY_FEE_NORMAL_REG).unwrap_or(DEFAULT_FEE_NORMAL_REG)
 }
 
 fn get_fee_normal_renew() -> u64 {
     let storage = get_storage()
-    let value = storage.load(KEY_FEE_NORMAL_RENEW)
-    if value.is_some() == false {
-        return DEFAULT_FEE_NORMAL_RENEW
-    }
-    return value.unwrap() as u64
+    return storage.load(KEY_FEE_NORMAL_RENEW).unwrap_or(DEFAULT_FEE_NORMAL_RENEW)
 }
 
 fn store_all_fees(sr: u64, srn: u64, nr: u64, nrn: u64) {
@@ -275,11 +255,7 @@ fn current_time() -> u64 {
 }
 
 fn get_deposit_amount() -> u64 {
-    let deposit = get_deposit_for_asset(Hash::zero())
-    if deposit.is_some() == false {
-        return 0
-    }
-    return deposit.unwrap()
+    return get_deposit_for_asset(Hash::zero()).unwrap_or(0)
 }
 
 fn is_name_available(name: string) -> bool {
