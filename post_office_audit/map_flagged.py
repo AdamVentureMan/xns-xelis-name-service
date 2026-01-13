@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Set, Tuple
 from urllib.parse import quote_plus
 
 import pandas as pd
 import folium
 from folium import plugins
+import requests
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -50,6 +51,84 @@ def _gmaps_search_url(query: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={quote_plus(query)}"
 
 
+def download_ovc_voter_ids(
+    *,
+    output_dir: Path,
+    url: str,
+    force: bool = False,
+) -> Set[str]:
+    """
+    Download Ohio Votes Count page and extract voter IDs from HTML tables.
+    Caches both the HTML and the extracted IDs under output/.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    html_cache = output_dir / "ovc_source.html"
+    ids_cache = output_dir / "ovc_voter_ids.csv"
+
+    if ids_cache.exists() and not force:
+        try:
+            cached = pd.read_csv(ids_cache, dtype=str)
+            if "voter_id" in cached.columns:
+                return set(cached["voter_id"].fillna("").astype(str).str.strip())
+        except Exception:
+            pass
+
+    if not html_cache.exists() or force:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        html_cache.write_text(resp.text, encoding="utf-8", errors="ignore")
+
+    html = html_cache.read_text(encoding="utf-8", errors="ignore")
+
+    # Use pandas to parse all HTML tables. (Requires lxml.)
+    tables = pd.read_html(html)
+    all_ids: Set[str] = set()
+
+    for t in tables:
+        if t.empty:
+            continue
+
+        # Normalize column names
+        t.columns = [str(c).strip() for c in t.columns]
+        lower_cols = {c.lower(): c for c in t.columns}
+
+        # Common variants
+        candidates = [
+            "sos voter id",
+            "sos_voterid",
+            "voter id",
+            "voter_id",
+            "sos voterid",
+        ]
+
+        col = None
+        for cand in candidates:
+            if cand in lower_cols:
+                col = lower_cols[cand]
+                break
+        if col is None:
+            # Last resort: pick any column containing both 'voter' and 'id'
+            for c in t.columns:
+                cl = c.lower()
+                if "voter" in cl and "id" in cl:
+                    col = c
+                    break
+
+        if col is None:
+            continue
+
+        ids = t[col].astype(str).str.strip()
+        ids = ids[ids.ne("") & ids.ne("nan")]
+        all_ids.update(ids.tolist())
+
+    pd.DataFrame({"voter_id": sorted(all_ids)}).to_csv(ids_cache, index=False)
+    return all_ids
+
+
 def create_map() -> Path:
     data_dir, output_dir = load_paths()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +154,25 @@ def create_map() -> Path:
     df["po_lat"] = df.get("po_lat", pd.Series([None] * len(df)))
     df["po_long"] = df.get("po_long", pd.Series([None] * len(df)))
 
+    # Optional: download Ohio Votes Count voter IDs and tag our results.
+    ovc_url = os.environ.get(
+        "OVC_URL",
+        "https://ohiovotescount.com/us-post-office-registrations-voter-registration-issues-january-2026/",
+    ).strip()
+    ovc_enabled = os.environ.get("OVC_ENABLE", "1").strip().lower() in {"1", "true", "t", "yes", "y"}
+    ovc_force = os.environ.get("OVC_FORCE", "0").strip().lower() in {"1", "true", "t", "yes", "y"}
+
+    ovc_ids: Set[str] = set()
+    if ovc_enabled:
+        try:
+            ovc_ids = download_ovc_voter_ids(output_dir=output_dir, url=ovc_url, force=ovc_force)
+            print(f"Loaded Ohio Votes Count IDs: {len(ovc_ids)} (cached under {output_dir})")
+        except Exception as e:
+            print(f"WARNING: OVC download/parse failed; continuing without comparison: {e}")
+
+    df["voter_id"] = df.get("voter_id", pd.Series([""] * len(df))).fillna("").astype(str).str.strip()
+    df["ovc_reported"] = df["voter_id"].isin(ovc_ids) if ovc_ids else False
+
     # Center map on available facility coords; otherwise default Ohio center.
     coords = df.loc[df["flag_facility_street_match"], ["po_lat", "po_long"]].copy()
     coords["po_lat"] = coords["po_lat"].apply(_safe_float)
@@ -94,17 +192,12 @@ def create_map() -> Path:
     fg_review = folium.FeatureGroup(name="Facility match (needs review: no unit)", show=True)
     fg_legit = folium.FeatureGroup(name="Facility match (likely legit: has unit)", show=True)
 
-    # Cluster facility markers (keeps map responsive for large result sets).
-    cluster_review = plugins.MarkerCluster(name="Cluster: needs review")
-    cluster_legit = plugins.MarkerCluster(name="Cluster: likely legit")
-    cluster_review.add_to(fg_review)
-    cluster_legit.add_to(fg_legit)
-
     # Stats
     added_facility = 0
     skipped_no_coords = 0
     count_po_box_only = 0
     count_keyword_only = 0
+    count_ovc_reported = 0
 
     for _, row in df.iterrows():
         addr = str(row.get("addr", "")).strip()
@@ -123,6 +216,9 @@ def create_map() -> Path:
         voter_id = row.get("voter_id", "N/A")
         name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
         reason = str(row.get("match_reason", "")).strip()
+        on_ovc = bool(row.get("ovc_reported", False))
+        if on_ovc:
+            count_ovc_reported += 1
 
         # Build popup with Google Maps links.
         popup_html = f"""
@@ -135,6 +231,7 @@ def create_map() -> Path:
             <tr><td><b>City/ZIP:</b></td><td>{city} {zip5}</td></tr>
             <tr><td><b>Has unit/apt:</b></td><td>{"Yes" if has_unit else "No"}</td></tr>
             <tr><td><b>Reason:</b></td><td>{reason or "N/A"}</td></tr>
+            <tr><td><b>On Ohio Votes Count:</b></td><td>{"Yes" if on_ovc else "No"}</td></tr>
             <tr><td><b>Flags:</b></td><td>
               {"Facility" if is_facility else ""}{"; " if is_facility and (is_po_box or is_keyword) else ""}
               {"PO BOX" if is_po_box else ""}{"; " if is_po_box and is_keyword else ""}
@@ -176,7 +273,7 @@ def create_map() -> Path:
             )
 
             color = "orange" if has_unit else "red"
-            icon = "home" if has_unit else "exclamation-sign"
+            icon = "star" if on_ovc else ("home" if has_unit else "exclamation-sign")
             tooltip = f"{name or voter_id} — {city} ({'has unit' if has_unit else 'no unit'})"
 
             marker = folium.Marker(
@@ -185,7 +282,7 @@ def create_map() -> Path:
                 icon=folium.Icon(color=color, icon=icon),
                 tooltip=tooltip,
             )
-            marker.add_to(cluster_legit if has_unit else cluster_review)
+            marker.add_to(fg_legit if has_unit else fg_review)
             added_facility += 1
         else:
             # PO BOX / keyword-only records typically do not have coordinates without geocoding.
@@ -228,6 +325,8 @@ def create_map() -> Path:
     if count_po_box_only or count_keyword_only:
         print(f"- PO BOX-only flags (not mapped): {count_po_box_only}")
         print(f"- Keyword-only flags (not mapped): {count_keyword_only}")
+    if ovc_ids:
+        print(f"- Flagged records also on Ohio Votes Count: {count_ovc_reported}")
     return out_path
 
 

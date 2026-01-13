@@ -40,6 +40,16 @@ It writes: `output/flagged_addresses_map.html`
 
 Note: **PO BOX / keyword-only** flags typically have no coordinates without geocoding, so they are **not mapped** (but are counted in the console output and still have Google Maps search links in the CSV).
 
+### Ohio Votes Count comparison (download + map annotation)
+
+By default, the map script will also download the Ohio Votes Count page and extract voter IDs from its HTML tables, then annotate each flagged record with `On Ohio Votes Count: Yes/No` in the popup (and use a **star** icon when `Yes`).
+
+Controls:
+
+- `OVC_ENABLE=0`: disable download/compare
+- `OVC_FORCE=1`: force re-download (refresh cache)
+- `OVC_URL=...`: override the page URL
+
 You can override paths via environment variables:
 
 - `POST_OFFICE_DATA_DIR`: folder containing `SWVF_*.txt`/`SWVF_*.csv` and where USPS cache will be stored
