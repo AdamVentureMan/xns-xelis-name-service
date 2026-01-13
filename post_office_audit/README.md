@@ -36,6 +36,19 @@ This runs scan → (optional) Ohio Votes Count download → map:
 python post_office_audit/run_pipeline.py
 ```
 
+### One-file master pipeline (no arguments)
+
+If you want a single script you can run with **no command line args**:
+
+```bash
+python post_office_audit/master_pipeline.py
+```
+
+Defaults:
+
+- `data/` input, `output/` output, state `OH`
+- Ohio Votes Count comparison enabled
+
 Options:
 
 - `--data-dir <path>`
