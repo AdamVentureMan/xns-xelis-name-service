@@ -782,8 +782,10 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     folium.TileLayer("CartoDB positron", name="Base: Positron", control=True).add_to(m)
 
     # Overlay groups (split to make toggles + legend clearer)
-    fg_review_not_ovc = folium.FeatureGroup(name="Needs review (no unit) — NOT on OVC", show=True)
-    fg_review_ovc = folium.FeatureGroup(name="Needs review (no unit) — ON OVC", show=True)
+    fg_review_not_ovc_noev = folium.FeatureGroup(name="Needs review (no unit, no LBRS unit evidence) — NOT on OVC", show=True)
+    fg_review_not_ovc_ev = folium.FeatureGroup(name="Needs review (no unit, LBRS unit evidence) — NOT on OVC", show=True)
+    fg_review_ovc_noev = folium.FeatureGroup(name="Needs review (no unit, no LBRS unit evidence) — ON OVC", show=True)
+    fg_review_ovc_ev = folium.FeatureGroup(name="Needs review (no unit, LBRS unit evidence) — ON OVC", show=True)
     fg_keyword_geocoded = folium.FeatureGroup(name="Keyword-only (geocoded voter address)", show=False)
     fg_ovc_geocoded = folium.FeatureGroup(name="Ohio Votes Count (geocoded voter address)", show=False)
 
@@ -794,8 +796,10 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     count_ovc_reported = int(df["ovc_reported"].sum())
     count_facility_ovc = 0
     count_facility_not_ovc = 0
-    count_review_ovc = 0
-    count_review_not_ovc = 0
+    count_review_ovc_noev = 0
+    count_review_not_ovc_noev = 0
+    count_review_ovc_ev = 0
+    count_review_not_ovc_ev = 0
     count_legit_skipped_ovc = 0
     count_legit_skipped_not_ovc = 0
     count_apartment_evidence = 0
@@ -932,16 +936,24 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
                     # "Likely legit" records are intentionally not plotted on the map.
                     count_legit_skipped_ovc += 1
                 else:
-                    count_review_ovc += 1
-                    marker.add_to(fg_review_ovc)
+                    if has_apartment_evidence:
+                        count_review_ovc_ev += 1
+                        marker.add_to(fg_review_ovc_ev)
+                    else:
+                        count_review_ovc_noev += 1
+                        marker.add_to(fg_review_ovc_noev)
             else:
                 count_facility_not_ovc += 1
                 if has_unit:
                     # "Likely legit" records are intentionally not plotted on the map.
                     count_legit_skipped_not_ovc += 1
                 else:
-                    count_review_not_ovc += 1
-                    marker.add_to(fg_review_not_ovc)
+                    if has_apartment_evidence:
+                        count_review_not_ovc_ev += 1
+                        marker.add_to(fg_review_not_ovc_ev)
+                    else:
+                        count_review_not_ovc_noev += 1
+                        marker.add_to(fg_review_not_ovc_noev)
             added_facility += 1
         else:
             if is_po_box:
@@ -1019,8 +1031,10 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
                 ).add_to(fg_ovc_geocoded)
                 count_ovc_geocoded += 1
 
-    fg_review_not_ovc.add_to(m)
-    fg_review_ovc.add_to(m)
+    fg_review_not_ovc_noev.add_to(m)
+    fg_review_not_ovc_ev.add_to(m)
+    fg_review_ovc_noev.add_to(m)
+    fg_review_ovc_ev.add_to(m)
     fg_keyword_geocoded.add_to(m)
     fg_ovc_geocoded.add_to(m)
 
@@ -1035,9 +1049,11 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         <div><b>Star icon</b>: also reported on Ohio Votes Count</div>
         <hr style="margin: 8px 0;">
         <div><b>Counts (mapped markers)</b>:</div>
-        <div style="margin-left: 6px;">Needs review — ON OVC: __REVIEW_OVC__</div>
-        <div style="margin-left: 6px;">Needs review — NOT on OVC: __REVIEW_NOT_OVC__</div>
-        <div style="margin-left: 6px;">Needs review + LBRS unit evidence: __APT_EVIDENCE__</div>
+        <div style="margin-left: 6px;">No unit & ON OVC & no LBRS evidence: __REVIEW_OVC_NOEV__</div>
+        <div style="margin-left: 6px;">No unit & ON OVC & LBRS evidence: __REVIEW_OVC_EV__</div>
+        <div style="margin-left: 6px;">No unit & NOT on OVC & no LBRS evidence: __REVIEW_NOT_OVC_NOEV__</div>
+        <div style="margin-left: 6px;">No unit & NOT on OVC & LBRS evidence: __REVIEW_NOT_OVC_EV__</div>
+        <div style="margin-left: 6px;">Total with LBRS unit evidence (purple): __APT_EVIDENCE__</div>
         <div style="margin-top: 6px; color: #666;">
           Note: "Likely legit (has unit)" records are not plotted.
         </div>
@@ -1053,8 +1069,10 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     </div>
     """
     legend_html = (
-        legend_html.replace("__REVIEW_OVC__", str(count_review_ovc))
-        .replace("__REVIEW_NOT_OVC__", str(count_review_not_ovc))
+        legend_html.replace("__REVIEW_OVC_NOEV__", str(count_review_ovc_noev))
+        .replace("__REVIEW_OVC_EV__", str(count_review_ovc_ev))
+        .replace("__REVIEW_NOT_OVC_NOEV__", str(count_review_not_ovc_noev))
+        .replace("__REVIEW_NOT_OVC_EV__", str(count_review_not_ovc_ev))
         .replace("__APT_EVIDENCE__", str(count_apartment_evidence))
     )
     m.get_root().html.add_child(folium.Element(legend_html))
