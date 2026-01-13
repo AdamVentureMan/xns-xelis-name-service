@@ -51,6 +51,12 @@ ARCGIS_USPS_FACILITIES_URL = (
 
 DEFAULT_OVC_URL = "https://ohiovotescount.com/us-post-office-registrations-voter-registration-issues-january-2026/"
 
+# Ohio statewide address points (OGRIP / LBRS)
+OHIO_LBRS_ADDRESS_POINTS_LAYER_URL = (
+    "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/"
+    "Statewide_LBRS_Address_Points/FeatureServer/0"
+)
+
 CITY_ALIASES: Dict[str, str] = {
     "ST MARYS": "SAINT MARYS",
     "ST. MARYS": "SAINT MARYS",
@@ -240,6 +246,89 @@ def geocode_addresses(
     q["geocode_lon"] = lon_list
     q["geocode_status"] = status_list
     return q
+
+
+def lbrs_query_near(
+    *,
+    lat: float,
+    lon: float,
+    session: requests.Session,
+    distance_m: int = 40,
+    timeout: int = 30,
+) -> Dict:
+    """
+    Spatial query against Ohio Statewide LBRS Address Points.
+    Returns a dict with counts + unit info.
+    """
+    params = {
+        "f": "json",
+        "where": "1=1",
+        "outFields": "HOUSENUM,ST_PREFIX,ST_NAME,ST_TYPE,ST_SUFFIX,ZIPCODE,USPS_CITY,COUNTY,UNITNUM,UNITEXTRA",
+        "returnGeometry": "false",
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "distance": str(distance_m),
+        "units": "esriSRUnit_Meter",
+        "resultRecordCount": "2000",
+    }
+    try:
+        resp = session.get(f"{OHIO_LBRS_ADDRESS_POINTS_LAYER_URL}/query", params=params, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        feats = data.get("features", []) or []
+    except Exception:
+        feats = []
+
+    units: Set[str] = set()
+    for f in feats:
+        attrs = f.get("attributes") or {}
+        u = str(attrs.get("UNITNUM") or "").strip()
+        ux = str(attrs.get("UNITEXTRA") or "").strip()
+        if u or ux:
+            units.add(f"{u}|{ux}")
+
+    return {
+        "lbrs_points_nearby": len(feats),
+        "lbrs_units_nearby": len(units),
+        "lbrs_has_any_unit_nearby": bool(units),
+    }
+
+
+def attach_lbrs_evidence_to_geocodes(
+    geocoded: pd.DataFrame,
+    *,
+    sleep_s: float = 0.0,
+) -> pd.DataFrame:
+    """
+    For geocoded rows (with geocode_lat/geocode_lon), query LBRS address points nearby
+    and attach unit/point counts as evidence.
+    """
+    out = geocoded.copy()
+    out["lbrs_points_nearby"] = 0
+    out["lbrs_units_nearby"] = 0
+    out["lbrs_has_any_unit_nearby"] = False
+
+    session = requests.Session()
+    cache: Dict[str, Dict] = {}
+
+    for idx, r in tqdm(out.iterrows(), total=len(out), desc="LBRS nearby"):
+        lat = _safe_float(r.get("geocode_lat"))
+        lon = _safe_float(r.get("geocode_lon"))
+        if lat is None or lon is None:
+            continue
+        key = f"{round(lat, 6)},{round(lon, 6)}"
+        if key not in cache:
+            cache[key] = lbrs_query_near(lat=lat, lon=lon, session=session)
+            if sleep_s:
+                time.sleep(sleep_s)
+        ev = cache[key]
+        out.at[idx, "lbrs_points_nearby"] = ev["lbrs_points_nearby"]
+        out.at[idx, "lbrs_units_nearby"] = ev["lbrs_units_nearby"]
+        out.at[idx, "lbrs_has_any_unit_nearby"] = ev["lbrs_has_any_unit_nearby"]
+
+    return out
 
 
 # -----------------------------
@@ -739,6 +828,9 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             geocode_rows = df.loc[mask_any, ["voter_id", "first_name", "last_name", "addr", "city", "zip5", "match_reason", "ovc_reported"]].copy()
             if not geocode_rows.empty:
                 geocode_rows = geocode_addresses(rows=geocode_rows, output_dir=output_html.parent, state=state, sleep_s=geocode_sleep_s)
+                # Attach Ohio LBRS address-point evidence (units near address / number of points).
+                lbrs_sleep_s = float(os.environ.get("LBRS_SLEEP_S", "0").strip() or "0")
+                geocode_rows = attach_lbrs_evidence_to_geocodes(geocode_rows, sleep_s=lbrs_sleep_s)
 
     for _, row in df.iterrows():
         addr = str(row.get("addr", "")).strip()
@@ -789,6 +881,16 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             po_zip = str(row.get("po_zip5", "")).strip()
             po_gmaps = _gmaps_search_url(f"{lat},{lon}")
 
+            # LBRS evidence around the facility coordinate (helps infer upstairs units).
+            # Use a small cache keyed by rounded coords to avoid repeat calls.
+            if "lbrs_fac_cache" not in locals():
+                lbrs_fac_cache = {}  # type: ignore[var-annotated]
+                lbrs_fac_session = requests.Session()  # type: ignore[var-annotated]
+            fac_key = f"{round(lat, 6)},{round(lon, 6)}"
+            if fac_key not in lbrs_fac_cache:
+                lbrs_fac_cache[fac_key] = lbrs_query_near(lat=lat, lon=lon, session=lbrs_fac_session, distance_m=40)
+            lbrs_fac = lbrs_fac_cache[fac_key]
+
             popup_html = popup_html.replace(
                 "</div>",
                 f"""
@@ -797,6 +899,9 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
                 </p>
                 <p style="margin: 6px 0; font-size: 11px; color: #666;">
                   <b>Facility:</b> {po_name or "N/A"} — {po_addr}, {po_city} {po_zip}
+                </p>
+                <p style="margin: 6px 0; font-size: 11px; color: #666;">
+                  <b>LBRS nearby:</b> {lbrs_fac["lbrs_points_nearby"]} address points, {lbrs_fac["lbrs_units_nearby"]} unit values
                 </p>
                 </div>
                 """,
@@ -853,6 +958,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             reason = str(r.get("match_reason", "")).strip()
             on_ovc = bool(r.get("ovc_reported", False))
             status = str(r.get("geocode_status", "")).strip()
+            lbrs_points = int(r.get("lbrs_points_nearby", 0) or 0)
+            lbrs_units = int(r.get("lbrs_units_nearby", 0) or 0)
 
             voter_query = ", ".join([p for p in [addr, city, state, zip5] if p])
             voter_gmaps = _gmaps_search_url(voter_query or f"{city}, {state}")
@@ -868,6 +975,7 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
                 <tr><td><b>On Ohio Votes Count:</b></td><td>{"Yes" if on_ovc else "No"}</td></tr>
                 <tr><td><b>Reason:</b></td><td>{reason or "N/A"}</td></tr>
                 <tr><td><b>Geocode:</b></td><td>{status}</td></tr>
+                <tr><td><b>LBRS nearby:</b></td><td>{lbrs_points} pts / {lbrs_units} unit values</td></tr>
               </table>
               <hr style="margin: 10px 0;">
               <p style="margin: 6px 0;">
