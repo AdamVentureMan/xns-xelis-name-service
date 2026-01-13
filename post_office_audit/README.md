@@ -50,6 +50,20 @@ Controls:
 - `OVC_FORCE=1`: force re-download (refresh cache)
 - `OVC_URL=...`: override the page URL
 
+### Standalone Ohio Votes Count scraper
+
+If you just want to download/parse the site and save the extracted voter IDs (without generating a map):
+
+```bash
+python post_office_audit/ovc_scrape.py
+```
+
+Outputs:
+
+- `output/ovc_voter_ids.csv`
+- `output/ovc_tables_combined.csv` (all tables concatenated, when present)
+- `output/ovc_source.html` (cached page HTML)
+
 You can override paths via environment variables:
 
 - `POST_OFFICE_DATA_DIR`: folder containing `SWVF_*.txt`/`SWVF_*.csv` and where USPS cache will be stored
