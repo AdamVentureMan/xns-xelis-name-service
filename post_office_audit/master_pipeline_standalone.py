@@ -540,15 +540,28 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     coords = coords.dropna()
     center = [coords["po_lat"].mean(), coords["po_long"].mean()] if not coords.empty else [40.4173, -82.9071]
 
-    m = folium.Map(location=center, zoom_start=7, tiles="OpenStreetMap")
-    fg_review = folium.FeatureGroup(name="Facility match (needs review: no unit)", show=True)
-    fg_legit = folium.FeatureGroup(name="Facility match (likely legit: has unit)", show=True)
+    # Build the map with explicit base layers so LayerControl behaves consistently.
+    m = folium.Map(location=center, zoom_start=7, tiles=None)
+    folium.TileLayer("OpenStreetMap", name="Base: OpenStreetMap", control=True).add_to(m)
+    folium.TileLayer("CartoDB positron", name="Base: Positron", control=True).add_to(m)
+
+    # Overlay groups (split to make toggles + legend clearer)
+    fg_review_not_ovc = folium.FeatureGroup(name="Needs review (no unit) — NOT on OVC", show=True)
+    fg_review_ovc = folium.FeatureGroup(name="Needs review (no unit) — ON OVC", show=True)
+    fg_legit_not_ovc = folium.FeatureGroup(name="Likely legit (has unit) — NOT on OVC", show=True)
+    fg_legit_ovc = folium.FeatureGroup(name="Likely legit (has unit) — ON OVC", show=True)
 
     added_facility = 0
     skipped_no_coords = 0
     count_po_box_only = 0
     count_keyword_only = 0
     count_ovc_reported = int(df["ovc_reported"].sum())
+    count_facility_ovc = 0
+    count_facility_not_ovc = 0
+    count_review_ovc = 0
+    count_review_not_ovc = 0
+    count_legit_ovc = 0
+    count_legit_not_ovc = 0
 
     state = os.environ.get("POST_OFFICE_STATE", "OH").strip().upper() or "OH"
 
@@ -618,12 +631,30 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             icon = "star" if on_ovc else ("home" if has_unit else "exclamation-sign")
             tooltip = f"{name or voter_id} — {city} ({'has unit' if has_unit else 'no unit'})"
 
-            folium.Marker(
+            marker = folium.Marker(
                 location=[lat, lon],
                 popup=folium.Popup(popup_html, max_width=460),
                 icon=folium.Icon(color=color, icon=icon),
                 tooltip=tooltip,
-            ).add_to(fg_legit if has_unit else fg_review)
+            )
+
+            # Route marker to a specific overlay group so toggles work cleanly.
+            if on_ovc:
+                count_facility_ovc += 1
+                if has_unit:
+                    count_legit_ovc += 1
+                    marker.add_to(fg_legit_ovc)
+                else:
+                    count_review_ovc += 1
+                    marker.add_to(fg_review_ovc)
+            else:
+                count_facility_not_ovc += 1
+                if has_unit:
+                    count_legit_not_ovc += 1
+                    marker.add_to(fg_legit_not_ovc)
+                else:
+                    count_review_not_ovc += 1
+                    marker.add_to(fg_review_not_ovc)
             added_facility += 1
         else:
             if is_po_box:
@@ -631,30 +662,44 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             elif is_keyword:
                 count_keyword_only += 1
 
-    fg_review.add_to(m)
-    fg_legit.add_to(m)
+    fg_review_not_ovc.add_to(m)
+    fg_review_ovc.add_to(m)
+    fg_legit_not_ovc.add_to(m)
+    fg_legit_ovc.add_to(m)
 
     legend_html = """
     <div style="position: fixed; bottom: 50px; left: 50px; z-index: 1000;
                 background: white; padding: 12px; border-radius: 6px;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.3); font-family: Arial;">
-      <h4 style="margin: 0 0 8px 0;">Legend</h4>
+      <h4 style="margin: 0 0 8px 0;">Key</h4>
       <div style="font-size: 12px; line-height: 1.4;">
-        <div><span style="color: red;">&#9679;</span> Facility match — needs review (no unit)</div>
-        <div><span style="color: orange;">&#9679;</span> Facility match — likely legit (has unit)</div>
-        <div style="margin-top: 6px; color: #666;">
-          Star icon: also reported on Ohio Votes Count (if enabled).
-        </div>
-        <div style="margin-top: 6px; color: #666;">
+        <div><span style="color: red;">&#9679;</span> Needs review (no unit)</div>
+        <div><span style="color: orange;">&#9679;</span> Likely legit (has unit)</div>
+        <div><b>Star icon</b>: also reported on Ohio Votes Count</div>
+        <hr style="margin: 8px 0;">
+        <div><b>Counts (mapped markers)</b>:</div>
+        <div style="margin-left: 6px;">Needs review — ON OVC: __REVIEW_OVC__</div>
+        <div style="margin-left: 6px;">Needs review — NOT on OVC: __REVIEW_NOT_OVC__</div>
+        <div style="margin-left: 6px;">Likely legit — ON OVC: __LEGIT_OVC__</div>
+        <div style="margin-left: 6px;">Likely legit — NOT on OVC: __LEGIT_NOT_OVC__</div>
+        <hr style="margin: 8px 0;">
+        <div style="color: #666;">
           PO BOX / keyword-only flags are not mapped without geocoding.
         </div>
       </div>
     </div>
     """
+    legend_html = (
+        legend_html.replace("__REVIEW_OVC__", str(count_review_ovc))
+        .replace("__REVIEW_NOT_OVC__", str(count_review_not_ovc))
+        .replace("__LEGIT_OVC__", str(count_legit_ovc))
+        .replace("__LEGIT_NOT_OVC__", str(count_legit_not_ovc))
+    )
     m.get_root().html.add_child(folium.Element(legend_html))
 
     folium.LayerControl(collapsed=False).add_to(m)
-    plugins.Fullscreen().add_to(m)
+    # Put fullscreen on the left so it doesn't overlap the layer control toggle.
+    plugins.Fullscreen(position="topleft").add_to(m)
 
     output_html.parent.mkdir(parents=True, exist_ok=True)
     m.save(str(output_html))
@@ -669,6 +714,54 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         print(f"- Keyword-only flags (not mapped): {count_keyword_only}")
     if ovc_ids is not None:
         print(f"- Flagged records also on Ohio Votes Count: {count_ovc_reported}")
+        print(f"- Facility markers ON OVC: {count_facility_ovc}")
+        print(f"- Facility markers NOT on OVC: {count_facility_not_ovc}")
+
+
+def write_overlap_reports(
+    *,
+    flagged_csv: Path,
+    output_dir: Path,
+    ovc_ids: Set[str],
+) -> None:
+    """
+    Save concrete overlap/difference files based on SOS voter IDs.
+    """
+    df = pd.read_csv(flagged_csv, low_memory=False)
+    df["voter_id"] = df.get("voter_id", "").astype(str).str.strip()
+    our_ids = set(df["voter_id"].fillna("").astype(str).str.strip())
+    our_ids.discard("")
+
+    ovc_ids_norm = set(pd.Series(list(ovc_ids)).fillna("").astype(str).str.strip())
+    ovc_ids_norm.discard("")
+
+    overlap = our_ids & ovc_ids_norm
+    only_ours = our_ids - ovc_ids_norm
+    only_ovc = ovc_ids_norm - our_ids
+
+    # Save detailed overlap rows from our flagged set
+    output_dir.mkdir(parents=True, exist_ok=True)
+    df["ovc_reported"] = df["voter_id"].isin(ovc_ids_norm)
+
+    df[df["ovc_reported"]].to_csv(output_dir / "ovc_overlap_flagged.csv", index=False)
+    df[~df["ovc_reported"]].to_csv(output_dir / "ovc_not_in_web_flagged.csv", index=False)
+    pd.DataFrame({"voter_id": sorted(only_ovc)}).to_csv(output_dir / "ovc_only_ids.csv", index=False)
+
+    # Small summary table
+    summary = pd.DataFrame(
+        [
+            {"metric": "our_flagged_total", "value": len(our_ids)},
+            {"metric": "ovc_total", "value": len(ovc_ids_norm)},
+            {"metric": "overlap", "value": len(overlap)},
+            {"metric": "only_ours", "value": len(only_ours)},
+            {"metric": "only_ovc", "value": len(only_ovc)},
+            {
+                "metric": "recall_vs_ovc_percent",
+                "value": (round((len(overlap) / len(ovc_ids_norm)) * 100, 2) if ovc_ids_norm else 0.0),
+            },
+        ]
+    )
+    summary.to_csv(output_dir / "ovc_comparison_summary.csv", index=False)
 
 
 # -----------------------------
@@ -755,6 +848,14 @@ def main() -> int:
                 force=_bool_env("OVC_FORCE", False),
             )
             print(f"Ohio Votes Count IDs loaded: {len(ovc_ids)}")
+
+            # Write concrete overlap/difference outputs for review.
+            write_overlap_reports(flagged_csv=flagged_csv, output_dir=output_dir, ovc_ids=ovc_ids)
+            print("Wrote OVC overlap reports:")
+            print(f"- {output_dir / 'ovc_overlap_flagged.csv'}")
+            print(f"- {output_dir / 'ovc_not_in_web_flagged.csv'}")
+            print(f"- {output_dir / 'ovc_only_ids.csv'}")
+            print(f"- {output_dir / 'ovc_comparison_summary.csv'}")
         except Exception as e:
             print(f"WARNING: OVC download/parse failed; continuing without comparison: {e}")
             ovc_ids = None
