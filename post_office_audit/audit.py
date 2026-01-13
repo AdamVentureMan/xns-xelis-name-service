@@ -32,13 +32,13 @@ MULTISPACE_RE = re.compile(r"\s+")
 
 # PO BOX style: often won't match USPS facility street address; flag separately.
 PO_BOX_RE = re.compile(
-    r"\b(P\.?\s*O\.?\s*BOX|PO\s*BOX|P\s*O\s*BOX|POST\s+OFFICE\s+BOX)\b",
+    r"\b(?:P\.?\s*O\.?\s*BOX|PO\s*BOX|P\s*O\s*BOX|POST\s+OFFICE\s+BOX)\b",
     re.IGNORECASE,
 )
 
 # Commercial keywords: can catch mail centers/PMB/etc. Kept separate from PO BOX.
 COMMERCIAL_RE = re.compile(
-    r"\b(PMB|UPS\s*STORE|MAIL\s*(CENTER|CTR)|USPS|POST\s*OFFICE)\b",
+    r"\b(?:PMB|UPS\s*STORE|MAIL\s*(?:CENTER|CTR)|USPS|POST\s*OFFICE)\b",
     re.IGNORECASE,
 )
 
@@ -286,6 +286,8 @@ def scan_voter_file(
     total_high_priority = 0
 
     for chunk in tqdm(reader, desc=f"Scanning {path.name}"):
+        # Ensure all derived Series align (prevents NaN upcasts from index mismatch).
+        chunk = chunk.reset_index(drop=True)
         chunk = chunk.rename(
             columns={
                 "RESIDENTIAL_ADDRESS1": "addr1",
@@ -307,8 +309,8 @@ def scan_voter_file(
             addr2 = chunk["addr2"].fillna("").astype(str)
             addr = (addr + " " + addr2).str.replace(MULTISPACE_RE, " ", regex=True).str.strip()
 
-        city = chunk.get("city", pd.Series([""] * len(chunk))).fillna("").astype(str)
-        zip_series = chunk.get("zip", pd.Series([""] * len(chunk)))
+        city = chunk.get("city", pd.Series([""] * len(chunk), index=chunk.index)).fillna("").astype(str)
+        zip_series = chunk.get("zip", pd.Series([""] * len(chunk), index=chunk.index))
 
         addr_norm = normalize_text_series(addr)
         city_norm = normalize_text_series(city).replace(CITY_ALIASES)
@@ -363,7 +365,7 @@ def scan_voter_file(
         flag_any = flag_facility_street_match | flag_po_box_style | flag_commercial_keyword
 
         # Build a compact, auditable reason string.
-        match_reason = pd.Series([""] * len(base))
+        match_reason = pd.Series([""] * len(base), index=base.index)
         match_reason = match_reason.where(~city_hit, "facility_street_city")
         match_reason = match_reason.where(~(~city_hit & zip_hit), "facility_street_zip")
 
@@ -410,6 +412,9 @@ def scan_voter_file(
         out = out[flag_any].copy()
         if out.empty:
             continue
+
+        # Defensive: ensure boolean dtype even if upstream alignment ever changes.
+        out["has_unit"] = out["has_unit"].fillna(False).astype(bool)
 
         total_flagged += len(out)
         total_high_priority += int((~out["has_unit"]).sum())
