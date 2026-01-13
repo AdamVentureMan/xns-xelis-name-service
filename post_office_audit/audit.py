@@ -50,7 +50,7 @@ class Config:
     state: str
     data_dir: Path
     output_dir: Path
-    voter_glob: str = "SWVF_*.csv"
+    voter_glob: str = "SWVF_*"
     usps_cache_name: str = "usps_facilities.csv"
     chunksize: int = 100_000
     encoding: str = "ISO-8859-1"
@@ -78,6 +78,32 @@ def normalize_text_series(s: pd.Series) -> pd.Series:
 def extract_zip5_series(s: pd.Series) -> pd.Series:
     s = s.fillna("").astype(str)
     return s.str.extract(r"(\d{5})", expand=False).fillna("")
+
+
+def detect_delimiter(path: Path, *, encoding: str) -> str:
+    """
+    Ohio SWVF commonly arrives as .txt but is still delimited (often pipe).
+    We use a lightweight heuristic over the first non-empty line.
+    """
+    candidates = ["|", "\t", ","]
+    try:
+        with path.open("rb") as f:
+            sample = f.read(64 * 1024)
+        text = sample.decode(encoding, errors="ignore")
+    except Exception:
+        return ","
+
+    first_nonempty = ""
+    for line in text.splitlines():
+        if line.strip():
+            first_nonempty = line
+            break
+    if not first_nonempty:
+        return ","
+
+    counts = {c: first_nonempty.count(c) for c in candidates}
+    best = max(counts, key=counts.get)
+    return best if counts[best] > 0 else ","
 
 
 def request_json_with_backoff(
@@ -243,7 +269,8 @@ def scan_voter_file(
     output_csv: Path,
     write_header: bool,
 ) -> Tuple[int, int]:
-    header = pd.read_csv(path, nrows=0, encoding=cfg.encoding)
+    sep = detect_delimiter(path, encoding=cfg.encoding)
+    header = pd.read_csv(path, nrows=0, encoding=cfg.encoding, sep=sep)
     usecols, has_addr2 = infer_usecols(header.columns)
 
     reader = pd.read_csv(
@@ -251,6 +278,7 @@ def scan_voter_file(
         chunksize=cfg.chunksize,
         low_memory=False,
         encoding=cfg.encoding,
+        sep=sep,
         usecols=(usecols or None),
     )
 
@@ -398,10 +426,14 @@ def main() -> int:
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
-    voter_files = sorted(cfg.data_dir.glob(cfg.voter_glob))
+    voter_files = [
+        p
+        for p in sorted(cfg.data_dir.glob(cfg.voter_glob))
+        if p.is_file() and p.suffix.lower() in {".csv", ".txt"}
+    ]
     if not voter_files:
         print(f"No voter files found under: {cfg.data_dir.resolve()}", file=sys.stderr)
-        print(f"Expected pattern: {cfg.voter_glob}", file=sys.stderr)
+        print(f"Expected pattern: {cfg.voter_glob} (filtered to .csv/.txt)", file=sys.stderr)
         return 2
 
     usps_cache_csv = cfg.data_dir / cfg.usps_cache_name

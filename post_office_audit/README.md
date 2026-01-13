@@ -3,7 +3,7 @@
 This folder contains a **standalone** pipeline to:
 
 - Download/cache **USPS Facilities** for a state (default: **OH**) with **lat/long**.
-- Scan one or more Ohio SWVF voter CSVs (`SWVF_*.csv`) in **chunks**.
+- Scan one or more Ohio SWVF voter files (`SWVF_*.txt` or `SWVF_*.csv`) in **chunks**.
 - Flag records that match:
   - **Facility street address** (exact normalized address + city, or address + ZIP5 fallback)
   - **PO BOX–style addresses** (won’t usually match facility street address; flagged separately)
@@ -30,7 +30,7 @@ python post_office_audit/audit.py
 
 You can override paths via environment variables:
 
-- `POST_OFFICE_DATA_DIR`: folder containing `SWVF_*.csv` and where USPS cache will be stored
+- `POST_OFFICE_DATA_DIR`: folder containing `SWVF_*.txt`/`SWVF_*.csv` and where USPS cache will be stored
 - `POST_OFFICE_OUTPUT_DIR`: folder where results will be written
 - `POST_OFFICE_STATE`: 2-letter state code (default `OH`)
 
