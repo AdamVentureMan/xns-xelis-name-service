@@ -786,6 +786,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     fg_review_not_ovc_ev = folium.FeatureGroup(name="Needs review (no unit, LBRS unit evidence) — NOT on OVC", show=True)
     fg_review_ovc_noev = folium.FeatureGroup(name="Needs review (no unit, no LBRS unit evidence) — ON OVC", show=True)
     fg_review_ovc_ev = folium.FeatureGroup(name="Needs review (no unit, LBRS unit evidence) — ON OVC", show=True)
+    fg_legit_not_ovc = folium.FeatureGroup(name="Likely legit (has unit) — NOT on OVC", show=False)
+    fg_legit_ovc = folium.FeatureGroup(name="Likely legit (has unit) — ON OVC", show=False)
     fg_keyword_geocoded = folium.FeatureGroup(name="Keyword-only (geocoded voter address)", show=False)
     fg_ovc_geocoded = folium.FeatureGroup(name="Ohio Votes Count (geocoded voter address)", show=False)
 
@@ -800,15 +802,16 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     count_review_not_ovc_noev = 0
     count_review_ovc_ev = 0
     count_review_not_ovc_ev = 0
-    count_legit_skipped_ovc = 0
-    count_legit_skipped_not_ovc = 0
+    count_legit_ovc = 0
+    count_legit_not_ovc = 0
     count_apartment_evidence = 0
     count_keyword_geocoded = 0
     count_ovc_geocoded = 0
 
     state = os.environ.get("POST_OFFICE_STATE", "OH").strip().upper() or "OH"
 
-    # Geocode non-facility rows (keyword-only / po box) and optionally all OVC rows.
+    # Geocode non-facility rows (keyword-only / po box) and optionally OVC rows
+    # that do NOT already have a USPS facility match (avoids confusing duplicates).
     geocode_enable = _bool_env("GEOCODE_ENABLE", True)
     geocode_sleep_s = float(os.environ.get("GEOCODE_SLEEP_S", "0.2").strip() or "0.2")
     geocode_keyword_only = _bool_env("GEOCODE_KEYWORD_ONLY", True)
@@ -818,14 +821,14 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     if geocode_enable:
         mask_non_facility = ~df["flag_facility_street_match"]
         mask_keyword_only = mask_non_facility & df["flag_commercial_keyword"]
-        mask_ovc = df["ovc_reported"]
+        mask_ovc_nonfacility = df["ovc_reported"] & mask_non_facility
         keyword_only_ids = set(df.loc[mask_keyword_only, "voter_id"].astype(str).str.strip().tolist())
 
         masks = []
         if geocode_keyword_only:
             masks.append(mask_keyword_only)
         if geocode_ovc_all and ovc_ids:
-            masks.append(mask_ovc)
+            masks.append(mask_ovc_nonfacility)
 
         if masks:
             mask_any = masks[0].copy()
@@ -933,8 +936,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             if on_ovc:
                 count_facility_ovc += 1
                 if has_unit:
-                    # "Likely legit" records are intentionally not plotted on the map.
-                    count_legit_skipped_ovc += 1
+                    count_legit_ovc += 1
+                    marker.add_to(fg_legit_ovc)
                 else:
                     if has_apartment_evidence:
                         count_review_ovc_ev += 1
@@ -945,8 +948,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             else:
                 count_facility_not_ovc += 1
                 if has_unit:
-                    # "Likely legit" records are intentionally not plotted on the map.
-                    count_legit_skipped_not_ovc += 1
+                    count_legit_not_ovc += 1
+                    marker.add_to(fg_legit_not_ovc)
                 else:
                     if has_apartment_evidence:
                         count_review_not_ovc_ev += 1
@@ -1035,6 +1038,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     fg_review_not_ovc_ev.add_to(m)
     fg_review_ovc_noev.add_to(m)
     fg_review_ovc_ev.add_to(m)
+    fg_legit_not_ovc.add_to(m)
+    fg_legit_ovc.add_to(m)
     fg_keyword_geocoded.add_to(m)
     fg_ovc_geocoded.add_to(m)
 
@@ -1046,6 +1051,7 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
       <div style="font-size: 12px; line-height: 1.4;">
         <div><span style="color: red;">&#9679;</span> Needs review (no unit)</div>
         <div><span style="color: purple;">&#9679;</span> Needs review + LBRS unit evidence (possible upstairs units)</div>
+        <div><span style="color: orange;">&#9679;</span> Likely legit (has unit)</div>
         <div><b>Star icon</b>: also reported on Ohio Votes Count</div>
         <hr style="margin: 8px 0;">
         <div><b>Counts (mapped markers)</b>:</div>
@@ -1054,9 +1060,6 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         <div style="margin-left: 6px;">No unit & NOT on OVC & no LBRS evidence: __REVIEW_NOT_OVC_NOEV__</div>
         <div style="margin-left: 6px;">No unit & NOT on OVC & LBRS evidence: __REVIEW_NOT_OVC_EV__</div>
         <div style="margin-left: 6px;">Total with LBRS unit evidence (purple): __APT_EVIDENCE__</div>
-        <div style="margin-top: 6px; color: #666;">
-          Note: "Likely legit (has unit)" records are not plotted.
-        </div>
         <hr style="margin: 8px 0;">
         <div style="color: #666;">
           PO BOX / keyword-only flags are not mapped without geocoding.
@@ -1096,8 +1099,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         print(f"- Flagged records also on Ohio Votes Count: {count_ovc_reported}")
         print(f"- Facility markers ON OVC: {count_facility_ovc}")
         print(f"- Facility markers NOT on OVC: {count_facility_not_ovc}")
-        print(f"- Facility matches with unit (not plotted) ON OVC: {count_legit_skipped_ovc}")
-        print(f"- Facility matches with unit (not plotted) NOT on OVC: {count_legit_skipped_not_ovc}")
+        print(f"- Facility matches with unit ON OVC: {count_legit_ovc}")
+        print(f"- Facility matches with unit NOT on OVC: {count_legit_not_ovc}")
     if geocode_enable:
         print(f"- Geocoded keyword-only markers added: {count_keyword_geocoded}")
         print(f"- Geocoded OVC markers added: {count_ovc_geocoded}")
