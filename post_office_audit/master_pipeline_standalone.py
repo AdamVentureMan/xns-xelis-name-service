@@ -361,14 +361,14 @@ def scan_voter_file(
                 "zip5": zip5,
                 "addr_norm": addr_norm,
                 "city_norm": city_norm,
-                "zip5_key": zip5,
             }
         )
 
         m_city = base.merge(df_city, on=["addr_norm", "city_norm"], how="left")
         city_hit = m_city["po_name"].notna() & (m_city["po_name"].astype(str) != "")
 
-        m_zip = base.rename(columns={"zip5_key": "zip5"}).merge(df_zip, on=["addr_norm", "zip5"], how="left")
+        # ZIP-based fallback match. Keep only ONE zip5 column to avoid merge ambiguity.
+        m_zip = base.merge(df_zip, on=["addr_norm", "zip5"], how="left")
         zip_hit = m_zip["po_name"].notna() & (m_zip["po_name"].astype(str) != "")
 
         po_name = m_city["po_name"].where(city_hit, m_zip["po_name"])
