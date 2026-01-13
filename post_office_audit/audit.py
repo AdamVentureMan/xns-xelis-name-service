@@ -42,7 +42,9 @@ COMMERCIAL_RE = re.compile(
     re.IGNORECASE,
 )
 
-UNIT_RE = re.compile(r"\b(APT|UNIT|STE|SUITE|#)\b", re.IGNORECASE)
+# Non-capturing groups prevent pandas "match groups" warnings in str.contains().
+# Include '#' without requiring word boundaries.
+UNIT_RE = re.compile(r"(?:\b(?:APT|UNIT|STE|SUITE)\b|#)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -254,9 +256,12 @@ def infer_usecols(header_cols: Iterable[str]) -> Tuple[List[str], bool]:
     if not required.issubset(cols):
         return [], False
     usecols = sorted(required)
-    has_addr2 = "RESIDENTIAL_ADDRESS2" in cols
-    if has_addr2:
-        usecols.append("RESIDENTIAL_ADDRESS2")
+    # SWVF variants: some exports use RESIDENTIAL_SECONDARY_ADDR instead of RESIDENTIAL_ADDRESS2.
+    addr2_candidates = ["RESIDENTIAL_ADDRESS2", "RESIDENTIAL_SECONDARY_ADDR", "RESIDENTIAL_SECONDARY_ADDRESS"]
+    has_addr2 = any(c in cols for c in addr2_candidates)
+    for c in addr2_candidates:
+        if c in cols:
+            usecols.append(c)
     return usecols, has_addr2
 
 
@@ -292,6 +297,8 @@ def scan_voter_file(
             columns={
                 "RESIDENTIAL_ADDRESS1": "addr1",
                 "RESIDENTIAL_ADDRESS2": "addr2",
+                "RESIDENTIAL_SECONDARY_ADDR": "addr2",
+                "RESIDENTIAL_SECONDARY_ADDRESS": "addr2",
                 "RESIDENTIAL_CITY": "city",
                 "RESIDENTIAL_ZIP": "zip",
                 "SOS_VOTERID": "voter_id",
