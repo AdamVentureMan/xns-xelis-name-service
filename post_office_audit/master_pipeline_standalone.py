@@ -694,8 +694,6 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     # Overlay groups (split to make toggles + legend clearer)
     fg_review_not_ovc = folium.FeatureGroup(name="Needs review (no unit) — NOT on OVC", show=True)
     fg_review_ovc = folium.FeatureGroup(name="Needs review (no unit) — ON OVC", show=True)
-    fg_legit_not_ovc = folium.FeatureGroup(name="Likely legit (has unit) — NOT on OVC", show=True)
-    fg_legit_ovc = folium.FeatureGroup(name="Likely legit (has unit) — ON OVC", show=True)
     fg_keyword_geocoded = folium.FeatureGroup(name="Keyword-only (geocoded voter address)", show=False)
     fg_ovc_geocoded = folium.FeatureGroup(name="Ohio Votes Count (geocoded voter address)", show=False)
 
@@ -708,8 +706,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     count_facility_not_ovc = 0
     count_review_ovc = 0
     count_review_not_ovc = 0
-    count_legit_ovc = 0
-    count_legit_not_ovc = 0
+    count_legit_skipped_ovc = 0
+    count_legit_skipped_not_ovc = 0
     count_keyword_geocoded = 0
     count_ovc_geocoded = 0
 
@@ -819,16 +817,16 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             if on_ovc:
                 count_facility_ovc += 1
                 if has_unit:
-                    count_legit_ovc += 1
-                    marker.add_to(fg_legit_ovc)
+                    # "Likely legit" records are intentionally not plotted on the map.
+                    count_legit_skipped_ovc += 1
                 else:
                     count_review_ovc += 1
                     marker.add_to(fg_review_ovc)
             else:
                 count_facility_not_ovc += 1
                 if has_unit:
-                    count_legit_not_ovc += 1
-                    marker.add_to(fg_legit_not_ovc)
+                    # "Likely legit" records are intentionally not plotted on the map.
+                    count_legit_skipped_not_ovc += 1
                 else:
                     count_review_not_ovc += 1
                     marker.add_to(fg_review_not_ovc)
@@ -908,8 +906,6 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
 
     fg_review_not_ovc.add_to(m)
     fg_review_ovc.add_to(m)
-    fg_legit_not_ovc.add_to(m)
-    fg_legit_ovc.add_to(m)
     fg_keyword_geocoded.add_to(m)
     fg_ovc_geocoded.add_to(m)
 
@@ -920,14 +916,14 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
       <h4 style="margin: 0 0 8px 0;">Key</h4>
       <div style="font-size: 12px; line-height: 1.4;">
         <div><span style="color: red;">&#9679;</span> Needs review (no unit)</div>
-        <div><span style="color: orange;">&#9679;</span> Likely legit (has unit)</div>
         <div><b>Star icon</b>: also reported on Ohio Votes Count</div>
         <hr style="margin: 8px 0;">
         <div><b>Counts (mapped markers)</b>:</div>
         <div style="margin-left: 6px;">Needs review — ON OVC: __REVIEW_OVC__</div>
         <div style="margin-left: 6px;">Needs review — NOT on OVC: __REVIEW_NOT_OVC__</div>
-        <div style="margin-left: 6px;">Likely legit — ON OVC: __LEGIT_OVC__</div>
-        <div style="margin-left: 6px;">Likely legit — NOT on OVC: __LEGIT_NOT_OVC__</div>
+        <div style="margin-top: 6px; color: #666;">
+          Note: "Likely legit (has unit)" records are not plotted.
+        </div>
         <hr style="margin: 8px 0;">
         <div style="color: #666;">
           PO BOX / keyword-only flags are not mapped without geocoding.
@@ -942,8 +938,6 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     legend_html = (
         legend_html.replace("__REVIEW_OVC__", str(count_review_ovc))
         .replace("__REVIEW_NOT_OVC__", str(count_review_not_ovc))
-        .replace("__LEGIT_OVC__", str(count_legit_ovc))
-        .replace("__LEGIT_NOT_OVC__", str(count_legit_not_ovc))
     )
     m.get_root().html.add_child(folium.Element(legend_html))
 
@@ -966,6 +960,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         print(f"- Flagged records also on Ohio Votes Count: {count_ovc_reported}")
         print(f"- Facility markers ON OVC: {count_facility_ovc}")
         print(f"- Facility markers NOT on OVC: {count_facility_not_ovc}")
+        print(f"- Facility matches with unit (not plotted) ON OVC: {count_legit_skipped_ovc}")
+        print(f"- Facility matches with unit (not plotted) NOT on OVC: {count_legit_skipped_not_ovc}")
     if geocode_enable:
         print(f"- Geocoded keyword-only markers added: {count_keyword_geocoded}")
         print(f"- Geocoded OVC markers added: {count_ovc_geocoded}")
