@@ -253,7 +253,7 @@ def lbrs_query_near(
     lat: float,
     lon: float,
     session: requests.Session,
-    distance_m: int = 40,
+    distance_m: int = 15,
     timeout: int = 30,
 ) -> Dict:
     """
@@ -320,7 +320,8 @@ def attach_lbrs_evidence_to_geocodes(
             continue
         key = f"{round(lat, 6)},{round(lon, 6)}"
         if key not in cache:
-            cache[key] = lbrs_query_near(lat=lat, lon=lon, session=session)
+            dist = int(os.environ.get("LBRS_DISTANCE_M", "15").strip() or "15")
+            cache[key] = lbrs_query_near(lat=lat, lon=lon, session=session, distance_m=dist)
             if sleep_s:
                 time.sleep(sleep_s)
         ev = cache[key]
@@ -797,6 +798,7 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     count_review_not_ovc = 0
     count_legit_skipped_ovc = 0
     count_legit_skipped_not_ovc = 0
+    count_apartment_evidence = 0
     count_keyword_geocoded = 0
     count_ovc_geocoded = 0
 
@@ -888,7 +890,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
                 lbrs_fac_session = requests.Session()  # type: ignore[var-annotated]
             fac_key = f"{round(lat, 6)},{round(lon, 6)}"
             if fac_key not in lbrs_fac_cache:
-                lbrs_fac_cache[fac_key] = lbrs_query_near(lat=lat, lon=lon, session=lbrs_fac_session, distance_m=40)
+                dist = int(os.environ.get("LBRS_DISTANCE_M", "15").strip() or "15")
+                lbrs_fac_cache[fac_key] = lbrs_query_near(lat=lat, lon=lon, session=lbrs_fac_session, distance_m=dist)
             lbrs_fac = lbrs_fac_cache[fac_key]
 
             popup_html = popup_html.replace(
@@ -907,7 +910,11 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
                 """,
             )
 
-            color = "orange" if has_unit else "red"
+            # Color-code likely "apartment post offices": any unit indicators nearby in LBRS.
+            has_apartment_evidence = bool(lbrs_fac.get("lbrs_has_any_unit_nearby", False))
+            if has_apartment_evidence and not has_unit:
+                count_apartment_evidence += 1
+            color = "purple" if (has_apartment_evidence and not has_unit) else ("orange" if has_unit else "red")
             icon = "star" if on_ovc else ("home" if has_unit else "exclamation-sign")
             tooltip = f"{name or voter_id} — {city} ({'has unit' if has_unit else 'no unit'})"
 
@@ -1024,11 +1031,13 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
       <h4 style="margin: 0 0 8px 0;">Key</h4>
       <div style="font-size: 12px; line-height: 1.4;">
         <div><span style="color: red;">&#9679;</span> Needs review (no unit)</div>
+        <div><span style="color: purple;">&#9679;</span> Needs review + LBRS unit evidence (possible upstairs units)</div>
         <div><b>Star icon</b>: also reported on Ohio Votes Count</div>
         <hr style="margin: 8px 0;">
         <div><b>Counts (mapped markers)</b>:</div>
         <div style="margin-left: 6px;">Needs review — ON OVC: __REVIEW_OVC__</div>
         <div style="margin-left: 6px;">Needs review — NOT on OVC: __REVIEW_NOT_OVC__</div>
+        <div style="margin-left: 6px;">Needs review + LBRS unit evidence: __APT_EVIDENCE__</div>
         <div style="margin-top: 6px; color: #666;">
           Note: "Likely legit (has unit)" records are not plotted.
         </div>
@@ -1046,6 +1055,7 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     legend_html = (
         legend_html.replace("__REVIEW_OVC__", str(count_review_ovc))
         .replace("__REVIEW_NOT_OVC__", str(count_review_not_ovc))
+        .replace("__APT_EVIDENCE__", str(count_apartment_evidence))
     )
     m.get_root().html.add_child(folium.Element(legend_html))
 
