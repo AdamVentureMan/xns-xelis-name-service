@@ -139,6 +139,108 @@ def detect_delimiter(path: Path, *, encoding: str) -> str:
     best = max(counts, key=counts.get)
     return best if counts[best] > 0 else ","
 
+def _census_geocode_one_line(address_line: str, *, session: requests.Session, timeout: int = 30) -> Tuple[Optional[float], Optional[float], str]:
+    """
+    Geocode using US Census onelineaddress endpoint (no API key).
+    Returns (lat, lon, match_label).
+    """
+    url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+    params = {
+        "address": address_line,
+        "benchmark": "2020",
+        "format": "json",
+    }
+    try:
+        resp = session.get(url, params=params, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        matches = (((data or {}).get("result") or {}).get("addressMatches") or [])
+        if not matches:
+            return None, None, "no_match"
+        m = matches[0]
+        coords = m.get("coordinates") or {}
+        lon = coords.get("x")
+        lat = coords.get("y")
+        return (_safe_float(lat), _safe_float(lon), "matched")
+    except Exception:
+        return None, None, "error"
+
+
+def geocode_addresses(
+    *,
+    rows: pd.DataFrame,
+    output_dir: Path,
+    state: str,
+    cache_name: str = "geocode_cache.csv",
+    sleep_s: float = 0.2,
+) -> pd.DataFrame:
+    """
+    Geocode voter addresses (addr/city/zip5) and return rows with added lat/lon columns.
+    Caches results to output/geocode_cache.csv so reruns are fast.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = output_dir / cache_name
+
+    # Build query column
+    q = rows.copy()
+    q["addr"] = q.get("addr", "").fillna("").astype(str).str.strip()
+    q["city"] = q.get("city", "").fillna("").astype(str).str.strip()
+    q["zip5"] = q.get("zip5", "").fillna("").astype(str).str.strip()
+    q["geocode_query"] = q.apply(
+        lambda r: ", ".join([p for p in [r["addr"], r["city"], state, r["zip5"]] if p]),
+        axis=1,
+    )
+
+    # Load cache
+    cache = pd.DataFrame(columns=["geocode_query", "lat", "lon", "status"])
+    if cache_path.exists():
+        try:
+            cache = pd.read_csv(cache_path, dtype=str)
+        except Exception:
+            cache = pd.DataFrame(columns=["geocode_query", "lat", "lon", "status"])
+
+    cache = cache.dropna(subset=["geocode_query"]).copy() if not cache.empty else cache
+    cached_map = {}
+    if not cache.empty:
+        for _, r in cache.iterrows():
+            cached_map[str(r["geocode_query"])] = (r.get("lat"), r.get("lon"), r.get("status"))
+
+    unique_queries = sorted(set(q["geocode_query"].tolist()))
+    to_fetch = [qq for qq in unique_queries if qq and qq not in cached_map]
+
+    if to_fetch:
+        print(f"Geocoding {len(to_fetch)} unique addresses (Census)...")
+        session = requests.Session()
+        new_rows = []
+        for qq in tqdm(to_fetch, desc="Geocoding"):
+            lat, lon, status = _census_geocode_one_line(qq, session=session)
+            new_rows.append({"geocode_query": qq, "lat": lat, "lon": lon, "status": status})
+            time.sleep(sleep_s)
+
+        new_cache = pd.DataFrame(new_rows)
+        # Append + dedupe
+        cache_out = pd.concat([cache, new_cache], ignore_index=True)
+        cache_out = cache_out.drop_duplicates(subset=["geocode_query"], keep="last")
+        cache_out.to_csv(cache_path, index=False)
+
+        for _, r in new_cache.iterrows():
+            cached_map[str(r["geocode_query"])] = (r.get("lat"), r.get("lon"), r.get("status"))
+
+    # Apply cached results
+    lat_list = []
+    lon_list = []
+    status_list = []
+    for qq in q["geocode_query"].tolist():
+        lat, lon, status = cached_map.get(qq, (None, None, "missing"))
+        lat_list.append(_safe_float(lat))
+        lon_list.append(_safe_float(lon))
+        status_list.append(status)
+
+    q["geocode_lat"] = lat_list
+    q["geocode_lon"] = lon_list
+    q["geocode_status"] = status_list
+    return q
+
 
 # -----------------------------
 # USPS facilities download/cache
@@ -493,6 +595,49 @@ def download_ovc_voter_ids(
     pd.DataFrame({"voter_id": sorted(all_ids)}).to_csv(ids_cache, index=False)
     return all_ids
 
+def write_overlap_reports(
+    *,
+    flagged_csv: Path,
+    output_dir: Path,
+    ovc_ids: Set[str],
+) -> None:
+    """
+    Save concrete overlap/difference files based on SOS voter IDs.
+    """
+    df = pd.read_csv(flagged_csv, low_memory=False)
+    df["voter_id"] = df.get("voter_id", "").astype(str).str.strip()
+    our_ids = set(df["voter_id"].fillna("").astype(str).str.strip())
+    our_ids.discard("")
+
+    ovc_ids_norm = set(pd.Series(list(ovc_ids)).fillna("").astype(str).str.strip())
+    ovc_ids_norm.discard("")
+
+    overlap = our_ids & ovc_ids_norm
+    only_ours = our_ids - ovc_ids_norm
+    only_ovc = ovc_ids_norm - our_ids
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    df["ovc_reported"] = df["voter_id"].isin(ovc_ids_norm)
+
+    df[df["ovc_reported"]].to_csv(output_dir / "ovc_overlap_flagged.csv", index=False)
+    df[~df["ovc_reported"]].to_csv(output_dir / "ovc_not_in_web_flagged.csv", index=False)
+    pd.DataFrame({"voter_id": sorted(only_ovc)}).to_csv(output_dir / "ovc_only_ids.csv", index=False)
+
+    summary = pd.DataFrame(
+        [
+            {"metric": "our_flagged_total", "value": len(our_ids)},
+            {"metric": "ovc_total", "value": len(ovc_ids_norm)},
+            {"metric": "overlap", "value": len(overlap)},
+            {"metric": "only_ours", "value": len(only_ours)},
+            {"metric": "only_ovc", "value": len(only_ovc)},
+            {
+                "metric": "recall_vs_ovc_percent",
+                "value": (round((len(overlap) / len(ovc_ids_norm)) * 100, 2) if ovc_ids_norm else 0.0),
+            },
+        ]
+    )
+    summary.to_csv(output_dir / "ovc_comparison_summary.csv", index=False)
+
 
 # -----------------------------
 # Map generation
@@ -533,6 +678,7 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
 
     df["voter_id"] = df.get("voter_id", pd.Series([""] * len(df))).fillna("").astype(str).str.strip()
     df["ovc_reported"] = df["voter_id"].isin(ovc_ids) if ovc_ids else False
+    df["geocoded"] = False
 
     coords = df.loc[df["flag_facility_street_match"], ["po_lat", "po_long"]].copy()
     coords["po_lat"] = coords["po_lat"].apply(_safe_float)
@@ -550,6 +696,8 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     fg_review_ovc = folium.FeatureGroup(name="Needs review (no unit) — ON OVC", show=True)
     fg_legit_not_ovc = folium.FeatureGroup(name="Likely legit (has unit) — NOT on OVC", show=True)
     fg_legit_ovc = folium.FeatureGroup(name="Likely legit (has unit) — ON OVC", show=True)
+    fg_keyword_geocoded = folium.FeatureGroup(name="Keyword-only (geocoded voter address)", show=False)
+    fg_ovc_geocoded = folium.FeatureGroup(name="Ohio Votes Count (geocoded voter address)", show=False)
 
     added_facility = 0
     skipped_no_coords = 0
@@ -562,8 +710,37 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
     count_review_not_ovc = 0
     count_legit_ovc = 0
     count_legit_not_ovc = 0
+    count_keyword_geocoded = 0
+    count_ovc_geocoded = 0
 
     state = os.environ.get("POST_OFFICE_STATE", "OH").strip().upper() or "OH"
+
+    # Geocode non-facility rows (keyword-only / po box) and optionally all OVC rows.
+    geocode_enable = _bool_env("GEOCODE_ENABLE", True)
+    geocode_sleep_s = float(os.environ.get("GEOCODE_SLEEP_S", "0.2").strip() or "0.2")
+    geocode_keyword_only = _bool_env("GEOCODE_KEYWORD_ONLY", True)
+    geocode_ovc_all = _bool_env("GEOCODE_OVC_ALL", True)
+
+    geocode_rows = pd.DataFrame()
+    if geocode_enable:
+        mask_non_facility = ~df["flag_facility_street_match"]
+        mask_keyword_only = mask_non_facility & df["flag_commercial_keyword"]
+        mask_ovc = df["ovc_reported"]
+        keyword_only_ids = set(df.loc[mask_keyword_only, "voter_id"].astype(str).str.strip().tolist())
+
+        masks = []
+        if geocode_keyword_only:
+            masks.append(mask_keyword_only)
+        if geocode_ovc_all and ovc_ids:
+            masks.append(mask_ovc)
+
+        if masks:
+            mask_any = masks[0].copy()
+            for mm in masks[1:]:
+                mask_any = mask_any | mm
+            geocode_rows = df.loc[mask_any, ["voter_id", "first_name", "last_name", "addr", "city", "zip5", "match_reason", "ovc_reported"]].copy()
+            if not geocode_rows.empty:
+                geocode_rows = geocode_addresses(rows=geocode_rows, output_dir=output_html.parent, state=state, sleep_s=geocode_sleep_s)
 
     for _, row in df.iterrows():
         addr = str(row.get("addr", "")).strip()
@@ -662,10 +839,79 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
             elif is_keyword:
                 count_keyword_only += 1
 
+    # Add geocoded markers (keyword-only and/or OVC voter locations)
+    if geocode_enable and not geocode_rows.empty:
+        for _, r in geocode_rows.iterrows():
+            lat = _safe_float(r.get("geocode_lat"))
+            lon = _safe_float(r.get("geocode_lon"))
+            if lat is None or lon is None:
+                continue
+
+            voter_id = str(r.get("voter_id", "")).strip()
+            name = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip()
+            addr = str(r.get("addr", "")).strip()
+            city = str(r.get("city", "")).strip()
+            zip5 = str(r.get("zip5", "")).strip()
+            reason = str(r.get("match_reason", "")).strip()
+            on_ovc = bool(r.get("ovc_reported", False))
+            status = str(r.get("geocode_status", "")).strip()
+
+            voter_query = ", ".join([p for p in [addr, city, state, zip5] if p])
+            voter_gmaps = _gmaps_search_url(voter_query or f"{city}, {state}")
+
+            popup = f"""
+            <div style="width: 360px; font-family: Arial, sans-serif;">
+              <h4 style="margin: 0 0 10px 0;">Geocoded voter address</h4>
+              <table style="width: 100%; font-size: 12px;">
+                <tr><td><b>Voter ID:</b></td><td>{voter_id or "N/A"}</td></tr>
+                <tr><td><b>Name:</b></td><td>{name or "N/A"}</td></tr>
+                <tr><td><b>Address:</b></td><td>{addr}</td></tr>
+                <tr><td><b>City/ZIP:</b></td><td>{city} {zip5}</td></tr>
+                <tr><td><b>On Ohio Votes Count:</b></td><td>{"Yes" if on_ovc else "No"}</td></tr>
+                <tr><td><b>Reason:</b></td><td>{reason or "N/A"}</td></tr>
+                <tr><td><b>Geocode:</b></td><td>{status}</td></tr>
+              </table>
+              <hr style="margin: 10px 0;">
+              <p style="margin: 6px 0;">
+                <a href="{voter_gmaps}" target="_blank">Open voter address in Google Maps</a>
+              </p>
+            </div>
+            """
+
+            # Keyword-only layer
+            if geocode_keyword_only and (voter_id in keyword_only_ids):
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=5,
+                    color="#6a0dad",
+                    fill=True,
+                    fill_color="#6a0dad",
+                    fill_opacity=0.75,
+                    popup=folium.Popup(popup, max_width=460),
+                    tooltip=f"{name or voter_id} — keyword-only geocode",
+                ).add_to(fg_keyword_geocoded)
+                count_keyword_geocoded += 1
+
+            # OVC layer
+            if geocode_ovc_all and on_ovc:
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=4,
+                    color="#1f77b4",
+                    fill=True,
+                    fill_color="#1f77b4",
+                    fill_opacity=0.65,
+                    popup=folium.Popup(popup, max_width=460),
+                    tooltip=f"{name or voter_id} — OVC geocode",
+                ).add_to(fg_ovc_geocoded)
+                count_ovc_geocoded += 1
+
     fg_review_not_ovc.add_to(m)
     fg_review_ovc.add_to(m)
     fg_legit_not_ovc.add_to(m)
     fg_legit_ovc.add_to(m)
+    fg_keyword_geocoded.add_to(m)
+    fg_ovc_geocoded.add_to(m)
 
     legend_html = """
     <div style="position: fixed; bottom: 50px; left: 50px; z-index: 1000;
@@ -685,6 +931,10 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         <hr style="margin: 8px 0;">
         <div style="color: #666;">
           PO BOX / keyword-only flags are not mapped without geocoding.
+        </div>
+        <div style="margin-top: 6px;">
+          <span style="color:#6a0dad;">&#9679;</span> Keyword-only (geocoded voter address)
+          &nbsp; <span style="color:#1f77b4;">&#9679;</span> OVC (geocoded voter address)
         </div>
       </div>
     </div>
@@ -716,52 +966,9 @@ def create_map(flagged_csv: Path, output_html: Path, *, ovc_ids: Optional[Set[st
         print(f"- Flagged records also on Ohio Votes Count: {count_ovc_reported}")
         print(f"- Facility markers ON OVC: {count_facility_ovc}")
         print(f"- Facility markers NOT on OVC: {count_facility_not_ovc}")
-
-
-def write_overlap_reports(
-    *,
-    flagged_csv: Path,
-    output_dir: Path,
-    ovc_ids: Set[str],
-) -> None:
-    """
-    Save concrete overlap/difference files based on SOS voter IDs.
-    """
-    df = pd.read_csv(flagged_csv, low_memory=False)
-    df["voter_id"] = df.get("voter_id", "").astype(str).str.strip()
-    our_ids = set(df["voter_id"].fillna("").astype(str).str.strip())
-    our_ids.discard("")
-
-    ovc_ids_norm = set(pd.Series(list(ovc_ids)).fillna("").astype(str).str.strip())
-    ovc_ids_norm.discard("")
-
-    overlap = our_ids & ovc_ids_norm
-    only_ours = our_ids - ovc_ids_norm
-    only_ovc = ovc_ids_norm - our_ids
-
-    # Save detailed overlap rows from our flagged set
-    output_dir.mkdir(parents=True, exist_ok=True)
-    df["ovc_reported"] = df["voter_id"].isin(ovc_ids_norm)
-
-    df[df["ovc_reported"]].to_csv(output_dir / "ovc_overlap_flagged.csv", index=False)
-    df[~df["ovc_reported"]].to_csv(output_dir / "ovc_not_in_web_flagged.csv", index=False)
-    pd.DataFrame({"voter_id": sorted(only_ovc)}).to_csv(output_dir / "ovc_only_ids.csv", index=False)
-
-    # Small summary table
-    summary = pd.DataFrame(
-        [
-            {"metric": "our_flagged_total", "value": len(our_ids)},
-            {"metric": "ovc_total", "value": len(ovc_ids_norm)},
-            {"metric": "overlap", "value": len(overlap)},
-            {"metric": "only_ours", "value": len(only_ours)},
-            {"metric": "only_ovc", "value": len(only_ovc)},
-            {
-                "metric": "recall_vs_ovc_percent",
-                "value": (round((len(overlap) / len(ovc_ids_norm)) * 100, 2) if ovc_ids_norm else 0.0),
-            },
-        ]
-    )
-    summary.to_csv(output_dir / "ovc_comparison_summary.csv", index=False)
+    if geocode_enable:
+        print(f"- Geocoded keyword-only markers added: {count_keyword_geocoded}")
+        print(f"- Geocoded OVC markers added: {count_ovc_geocoded}")
 
 
 # -----------------------------

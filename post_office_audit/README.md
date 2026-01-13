@@ -1,6 +1,6 @@
 ## Post Office / Commercial Address Audit (Ohio SWVF)
 
-This folder contains a **standalone** pipeline to:
+This folder contains a **single-file** pipeline:
 
 - Download/cache **USPS Facilities** for a state (default: **OH**) with **lat/long**.
 - Scan one or more Ohio SWVF voter files (`SWVF_*.txt` or `SWVF_*.csv`) in **chunks**.
@@ -9,8 +9,8 @@ This folder contains a **standalone** pipeline to:
   - **PO BOX–style addresses** (won’t usually match facility street address; flagged separately)
   - **Commercial mail keywords** (PMB/UPS Store/Mail Center/USPS/Post Office, etc.)
 - Produce output usable for both:
-  - **Auditing** (clear `match_reason`, booleans for each flag)
-  - **Mapping** (facility `po_lat`/`po_long` when a facility match exists)
+  - **Auditing** (OVC overlap reports)
+  - **Mapping** (facility coords + optional geocoding)
 
 ### Requirements
 
@@ -22,83 +22,16 @@ python -m pip install -r post_office_audit/requirements.txt
 
 ### Run
 
-By default, the script looks for voter files under `./data` and writes outputs under `./output`:
-
-```bash
-python post_office_audit/audit.py
-```
-
-### Run the full pipeline (recommended)
-
-This runs scan → (optional) Ohio Votes Count download → map:
-
-```bash
-python post_office_audit/run_pipeline.py
-```
-
-### One-file master pipeline (no arguments)
-
-If you want a single script you can run with **no command line args**:
-
-```bash
-python post_office_audit/master_pipeline.py
-```
-
-Defaults:
-
-- `data/` input, `output/` output, state `OH`
-- Ohio Votes Count comparison enabled
-
-If you need a *truly self-contained single file* (no local imports), use:
+Run the single master script (no args). It looks for voter files under `./data` and writes outputs under `./output`:
 
 ```bash
 python post_office_audit/master_pipeline_standalone.py
 ```
 
-Options:
+### Notes
 
-- `--data-dir <path>`
-- `--output-dir <path>`
-- `--state OH`
-- `--skip-ovc`
-- `--force-ovc`
-- `--ovc-url <url>`
-
-### Create an interactive map (HTML)
-
-This uses the facility coordinates already written into `output/flagged_voter_addresses.csv`.
-
-```bash
-python post_office_audit/map_flagged.py
-```
-
-It writes: `output/flagged_addresses_map.html`
-
-Note: **PO BOX / keyword-only** flags typically have no coordinates without geocoding, so they are **not mapped** (but are counted in the console output and still have Google Maps search links in the CSV).
-
-### Ohio Votes Count comparison (download + map annotation)
-
-By default, the map script will also download the Ohio Votes Count page and extract voter IDs from its HTML tables, then annotate each flagged record with `On Ohio Votes Count: Yes/No` in the popup (and use a **star** icon when `Yes`).
-
-Controls:
-
-- `OVC_ENABLE=0`: disable download/compare
-- `OVC_FORCE=1`: force re-download (refresh cache)
-- `OVC_URL=...`: override the page URL
-
-### Standalone Ohio Votes Count scraper
-
-If you just want to download/parse the site and save the extracted voter IDs (without generating a map):
-
-```bash
-python post_office_audit/ovc_scrape.py
-```
-
-Outputs:
-
-- `output/ovc_voter_ids.csv`
-- `output/ovc_tables_combined.csv` (all tables concatenated, when present)
-- `output/ovc_source.html` (cached page HTML)
+- The master script downloads Ohio Votes Count IDs (default enabled) and writes overlap CSVs.
+- Geocoding is **enabled by default** for mapping keyword-only and OVC voter addresses. Results are cached under `output/geocode_cache.csv`.
 
 You can override paths via environment variables:
 
@@ -109,7 +42,7 @@ You can override paths via environment variables:
 Example:
 
 ```bash
-POST_OFFICE_DATA_DIR="/path/to/data" POST_OFFICE_OUTPUT_DIR="/path/to/output" python post_office_audit/audit.py
+POST_OFFICE_DATA_DIR="/path/to/data" POST_OFFICE_OUTPUT_DIR="/path/to/output" python post_office_audit/master_pipeline_standalone.py
 ```
 
 ### Outputs
