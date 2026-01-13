@@ -28,6 +28,18 @@ By default, the script looks for voter files under `./data` and writes outputs u
 python post_office_audit/audit.py
 ```
 
+### Create an interactive map (HTML)
+
+This uses the facility coordinates already written into `output/flagged_voter_addresses.csv`.
+
+```bash
+python post_office_audit/map_flagged.py
+```
+
+It writes: `output/flagged_addresses_map.html`
+
+Note: **PO BOX / keyword-only** flags typically have no coordinates without geocoding, so they are **not mapped** (but are counted in the console output and still have Google Maps search links in the CSV).
+
 You can override paths via environment variables:
 
 - `POST_OFFICE_DATA_DIR`: folder containing `SWVF_*.txt`/`SWVF_*.csv` and where USPS cache will be stored
