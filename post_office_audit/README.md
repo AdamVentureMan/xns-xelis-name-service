@@ -49,6 +49,12 @@ Defaults:
 - `data/` input, `output/` output, state `OH`
 - Ohio Votes Count comparison enabled
 
+If you need a *truly self-contained single file* (no local imports), use:
+
+```bash
+python post_office_audit/master_pipeline_standalone.py
+```
+
 Options:
 
 - `--data-dir <path>`
