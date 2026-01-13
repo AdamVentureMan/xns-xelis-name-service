@@ -28,6 +28,23 @@ By default, the script looks for voter files under `./data` and writes outputs u
 python post_office_audit/audit.py
 ```
 
+### Run the full pipeline (recommended)
+
+This runs scan → (optional) Ohio Votes Count download → map:
+
+```bash
+python post_office_audit/run_pipeline.py
+```
+
+Options:
+
+- `--data-dir <path>`
+- `--output-dir <path>`
+- `--state OH`
+- `--skip-ovc`
+- `--force-ovc`
+- `--ovc-url <url>`
+
 ### Create an interactive map (HTML)
 
 This uses the facility coordinates already written into `output/flagged_voter_addresses.csv`.
